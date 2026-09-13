@@ -1,0 +1,1 @@
+"""Academic document assistant application."""

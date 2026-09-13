@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>知序 | 学术写作工作台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">知</span>
+      <span><strong>知序</strong><small>Academic Writing Studio</small></span>
+    </a>
+    <div class="topbar-actions">
+      <span class="status-dot"></span><span>本地工作区</span>
+      <button class="icon-button" id="refresh-history" title="刷新历史记录">↻</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">学术文本智能处理系统</p>
+        <h1>让论文整理，回到思考本身。</h1>
+        <p class="intro-copy">从文稿排版到文献脉络，上传材料，获得可核对、可编辑、可下载的学术写作初稿。</p>
+      </div>
+      <div class="intro-stat"><strong>2</strong><span>核心工作流</span></div>
+      <div class="intro-stat"><strong>3</strong><span>支持引用规范</span></div>
+    </section>
+
+    <nav class="tabs" aria-label="功能导航">
+      <button class="tab active" data-tab="format"><span>01</span>文稿规整</button>
+      <button class="tab" data-tab="review"><span>02</span>综述生成</button>
+      <button class="tab" data-tab="history"><span>03</span>处理记录</button>
+    </nav>
+
+    <section class="workspace">
+      <div class="panel tab-panel active" id="panel-format">
+        <div class="panel-heading">
+          <div><p class="kicker">MANUSCRIPT NORMALIZER</p><h2>单篇文稿规整</h2></div>
+          <span class="pill">支持 DOCX / PDF / TXT</span>
+        </div>
+        <form id="format-form">
+          <label class="dropzone" id="format-dropzone">
+            <input type="file" name="file" accept=".docx,.pdf,.txt,.md">
+            <span class="upload-icon">↑</span>
+            <strong>拖拽论文文件到这里</strong>
+            <span>或点击选择单篇文稿，最大 12 MB</span>
+            <em id="format-file-name">尚未选择文件</em>
+          </label>
+          <div class="form-row">
+            <label class="field"><span>目标引用规范</span>
+              <select name="style">
+                <option value="gb7714">GB/T 7714-2015（中国国家标准）</option>
+                <option value="apa7">APA 7</option>
+                <option value="ieee">IEEE</option>
+              </select>
+            </label>
+            <button class="primary-button" type="submit">开始规整 <span>→</span></button>
+          </div>
+        </form>
+        <div class="result-area" id="format-result"></div>
+      </div>
+
+      <div class="panel tab-panel" id="panel-review">
+        <div class="panel-heading">
+          <div><p class="kicker">LITERATURE SYNTHESIS</p><h2>批量生成综述</h2></div>
+          <span class="pill">结构化研究脉络</span>
+        </div>
+        <form id="review-form">
+          <label class="field topic-field"><span>研究主题 <small>可选，帮助组织综述标题</small></span>
+            <input type="text" name="topic" placeholder="例如：大模型在软件工程中的应用">
+          </label>
+          <label class="dropzone compact" id="review-dropzone">
+            <input type="file" name="files" multiple accept=".docx,.pdf,.txt,.md">
+            <span class="upload-icon">＋</span>
+            <strong>批量添加文献材料</strong>
+            <span>支持同时选择多篇 PDF、Word 或文本文件</span>
+            <em id="review-file-name">尚未选择文件</em>
+          </label>
+          <button class="primary-button" type="submit">生成结构化综述 <span>→</span></button>
+        </form>
+        <div class="result-area" id="review-result"></div>
+      </div>
+
+      <div class="panel tab-panel" id="panel-history">
+        <div class="panel-heading">
+          <div><p class="kicker">WORKSPACE HISTORY</p><h2>处理记录</h2></div>
+          <span class="pill">仅保存在本机</span>
+        </div>
+        <div id="history-list" class="history-list"><div class="empty-state">正在读取记录...</div></div>
+      </div>
+    </section>
+
+    <section class="principles">
+      <div><span class="principle-number">A</span><strong>规则先行</strong><p>先用可解释的格式规则处理，结果每一步都能核对。</p></div>
+      <div><span class="principle-number">B</span><strong>大模型增强</strong><p>配置模型接口后，综述可进一步进行观点归纳与表达优化。</p></div>
+      <div><span class="principle-number">C</span><strong>作者确认</strong><p>系统提供写作辅助，不替代作者对事实、引用和结论的最终判断。</p></div>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
