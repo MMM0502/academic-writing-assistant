@@ -7,6 +7,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import re
 
 
+_REFERENCE_HEADINGS = {"参考文献", "references", "bibliography", "references:"}
+
+
 def _run_xml(text: str, kind: str = "body") -> str:
     text = escape(text, quote=False)
     fonts = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="宋体"/>'
@@ -39,6 +42,14 @@ def _styles_xml() -> str:
 </w:styles>'''
 
 
+def _is_reference_heading(line: str) -> bool:
+    return line.strip().lower().rstrip(":：") in {h.rstrip(":：") for h in _REFERENCE_HEADINGS}
+
+
+def _looks_like_reference_entry(line: str) -> bool:
+    return bool(re.match(r"^\s*(?:\[\d+\]|\d+[.)、])\s+", line))
+
+
 def markdown_to_docx(markdown: str, title: str = "", style: str = "") -> bytes:
     """Generate a newly formatted DOCX from processed text, never the uploaded source file."""
     lines = []
@@ -59,7 +70,9 @@ def markdown_to_docx(markdown: str, title: str = "", style: str = "") -> bytes:
     first_content = True
     in_references = False
     for line, markdown_heading in lines:
-        if line in {"参考文献", "References", "Bibliography"}:
+        if _is_reference_heading(line):
+            if in_references:
+                continue
             in_references = True
             document_parts.append(_paragraph_xml("参考文献", "heading"))
         elif markdown_heading:
@@ -68,51 +81,50 @@ def markdown_to_docx(markdown: str, title: str = "", style: str = "") -> bytes:
             document_parts.append(_paragraph_xml(line, "title"))
         elif first_content and not title:
             document_parts.append(_paragraph_xml(line, "title"))
-        elif in_references or re.match(r"^\d+[.、)]\s*", line):
+        elif in_references or _looks_like_reference_entry(line):
             document_parts.append(_paragraph_xml(line, "reference"))
         else:
             document_parts.append(_paragraph_xml(line, "body"))
         first_content = False
 
-    document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        '<w:body>' + ''.join(document_parts) + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
-        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>'
-        '</w:sectPr></w:body></w:document>')
-    content_types = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
-        '</Types>')
-    relationships = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="word/styles.xml"/>'
-        '</Relationships>')
-    output = BytesIO()
-    with ZipFile(output, "w", ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", content_types)
-        archive.writestr("_rels/.rels", relationships)
-        archive.writestr("word/document.xml", document)
-        archive.writestr("word/styles.xml", _styles_xml())
-    return output.getvalue()
-
-
+    return _build_docx(document_parts)
 
 
 def format_result_to_docx(result: dict) -> bytes:
-    """Build a Word document from normalized fields, never from the source file."""
+    """Build a normalized Word document from processed fields, never from the source file."""
     title = str(result.get("title") or "学术文稿")
-    body_text = str(result.get("body_text") or result.get("formatted_text") or "")
+    body_text = str(result.get("body_text") or "")
+    if not body_text:
+        formatted = str(result.get("formatted_text") or "")
+        body_text = re.split(r"\n\s*参考文献\s*\n", formatted, maxsplit=1, flags=re.I)[0]
+
     body_paragraphs = [item.strip() for item in re.split(r"\n\s*\n", body_text) if item.strip()]
-    reference_lines = [str(item.get("formatted") or "").strip() for item in result.get("references", [])]
+
+    reference_items = result.get("references", []) or []
+    reference_lines: list[str] = []
+    for new_index, item in enumerate(reference_items, start=1):
+        formatted_line = str(item.get("formatted") or "").strip()
+        if not formatted_line:
+            continue
+        formatted_line = re.sub(r"^\s*\[\d+\]\s*", f"[{new_index}] ", formatted_line)
+        formatted_line = re.sub(r"^\s*\d+[.)、]\s*", f"{new_index}. ", formatted_line)
+        reference_lines.append(formatted_line)
+
     parts = [_paragraph_xml(title, "title")]
-    parts.extend(_paragraph_xml(item, "body") for item in body_paragraphs if item != title)
+    for item in body_paragraphs:
+        if item == title:
+            continue
+        if _is_reference_heading(item):
+            continue
+        if _looks_like_reference_entry(item) and reference_lines:
+            continue
+        parts.append(_paragraph_xml(item, "body"))
+
     if reference_lines:
         parts.append(_paragraph_xml("参考文献", "heading"))
-        parts.extend(_paragraph_xml(item, "reference") for item in reference_lines if item)
+        for line in reference_lines:
+            parts.append(_paragraph_xml(line, "reference"))
+
     return _build_docx(parts)
 
 
@@ -141,6 +153,8 @@ def _build_docx(document_parts: list[str]) -> bytes:
         archive.writestr("word/document.xml", document)
         archive.writestr("word/styles.xml", _styles_xml())
     return output.getvalue()
+
+
 def download_name(title: str, extension: str) -> str:
     safe = Path(title or "academic-result").stem
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", safe).strip(" .") or "academic-result"

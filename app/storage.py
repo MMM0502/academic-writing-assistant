@@ -11,20 +11,31 @@ from typing import Any
 class Store:
     def __init__(self, path: Path):
         self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self.connect()) as connection:
-            with connection:
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS jobs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        kind TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        payload TEXT NOT NULL
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with closing(self.connect()) as connection:
+                with connection:
+                    connection.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS jobs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            kind TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            payload TEXT NOT NULL
+                        )
+                        """
                     )
-                    """
-                )
+        except sqlite3.Error as exc:
+            raise RuntimeError(
+                f"数据库初始化失败：{exc}。请检查数据目录 {self.path.parent} 是否可写，"
+                "或通过环境变量 DATA_DIR 指定其他目录。"
+            ) from exc
+        except OSError as exc:
+            raise RuntimeError(
+                f"无法创建数据库目录 {self.path.parent}：{exc}。"
+                "可通过环境变量 DATA_DIR 指定一个可写目录。"
+            ) from exc
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -72,3 +83,15 @@ class Store:
             "created_at": row["created_at"],
             "payload": json.loads(row["payload"]),
         }
+
+    def delete(self, job_id: int) -> bool:
+        with closing(self.connect()) as connection:
+            with connection:
+                cursor = connection.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+                return cursor.rowcount > 0
+
+    def clear(self) -> int:
+        with closing(self.connect()) as connection:
+            with connection:
+                cursor = connection.execute("DELETE FROM jobs")
+                return int(cursor.rowcount)

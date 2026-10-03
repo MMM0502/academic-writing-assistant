@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass, asdict
 import re
 
-from .llm import generate_review
+from .llm import generate_review as _llm_generate_review
 from .parsers import sentence_list, title_from_text
 
 
@@ -104,7 +104,7 @@ def generate_review(items: list[LiteratureItem], topic: str = "") -> dict:
 
 
 def generate_review_with_llm(prompt: str) -> str | None:
-    return generate_review(prompt)
+    return _llm_generate_review(prompt)
 
 
 def serialize_items(items: list[LiteratureItem]) -> list[dict]:

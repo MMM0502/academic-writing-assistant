@@ -3,7 +3,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import cgi
+
 import json
 import mimetypes
 import re
@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import settings
 from .exporters import download_name, format_result_to_docx, markdown_to_docx
-from .formatters import STYLE_LABELS, format_document
+from .formatters import REFERENCE_TYPE_LABELS, STYLE_LABELS, check_citations, format_document, format_references
 from .parsers import extract_text
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
@@ -73,6 +73,11 @@ class Handler(BaseHTTPRequestHandler):
             self.download_job(parsed.path.rsplit("/", 1)[-1], parse_qs(parsed.query))
         elif parsed.path == "/api/health":
             self.send_payload(HTTPStatus.OK, {"status": "ok", "service": "academic-assistant"})
+        elif parsed.path == "/api/rules":
+            self.send_payload(HTTPStatus.OK, {
+                "styles": [{"code": code, "label": label} for code, label in STYLE_LABELS.items()],
+                "reference_types": REFERENCE_TYPE_LABELS,
+            })
         else:
             self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
 
@@ -121,19 +126,40 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/format", "/api/review"}:
+        if parsed.path not in {"/api/format", "/api/review", "/api/check-citations"}:
             self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
             return
         try:
             fields = self.parse_multipart()
             if parsed.path == "/api/format":
                 self.handle_format(fields)
+            elif parsed.path == "/api/check-citations":
+                self.handle_check_citations(fields)
             else:
                 self.handle_review(fields)
         except ValueError as exc:
             self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except Exception as exc:
             self.send_payload(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"处理失败：{exc}"})
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/history":
+            removed = store.clear()
+            self.send_payload(HTTPStatus.OK, {"removed": removed})
+            return
+        if parsed.path.startswith("/api/history/"):
+            try:
+                job_id = int(parsed.path.rsplit("/", 1)[-1])
+            except ValueError:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "记录编号无效"})
+                return
+            if store.delete(job_id):
+                self.send_payload(HTTPStatus.OK, {"removed": job_id})
+            else:
+                self.send_payload(HTTPStatus.NOT_FOUND, {"error": "记录不存在"})
+            return
+        self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
 
     def parse_multipart(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -145,32 +171,40 @@ class Handler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in content_type:
             raise ValueError("请求必须使用 multipart/form-data。")
-        environ = {
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": content_type,
-            "CONTENT_LENGTH": str(content_length),
-        }
-        field_storage = cgi.FieldStorage(
-            fp=__import__("io").BytesIO(body),
-            headers=self.headers,
-            environ=environ,
-            keep_blank_values=True,
-        )
+        boundary_match = re.search(r"boundary=([^;]+)", content_type)
+        if not boundary_match:
+            raise ValueError("无法解析上传请求的边界。")
+        boundary = boundary_match.group(1).strip().strip('"').encode("utf-8")
+        separator = b"--" + boundary
         result: dict = {"files": []}
-        for key in field_storage.keys():
-            values = field_storage[key]
-            if not isinstance(values, list):
-                values = [values]
-            for item in values:
-                if getattr(item, "filename", None):
-                    if len(item.file.read()) > settings.max_upload_bytes:
-                        raise ValueError("单个文件不能超过 12 MB。")
-                    item.file.seek(0)
-                    result["files"].append(
-                        {"field": key, "filename": safe_filename(item.filename), "data": item.file.read()}
-                    )
-                else:
-                    result[key] = item.value
+        for raw_part in body.split(separator):
+            part = raw_part.strip(b"\r\n")
+            if not part or part.startswith(b"--"):
+                continue
+            header_end = part.find(b"\r\n\r\n")
+            if header_end == -1:
+                continue
+            header_block = part[:header_end].decode("utf-8", errors="replace")
+            content = part[header_end + 4:]
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+            disp = re.search(
+                r'Content-Disposition: form-data; name="([^"]+)"(?:; filename="([^"]*)")?',
+                header_block,
+            )
+            if not disp:
+                continue
+            name, filename = disp.group(1), disp.group(2)
+            if filename is not None:
+                if len(content) > settings.max_upload_bytes:
+                    raise ValueError("单个文件不能超过 12 MB。")
+                if not filename:
+                    continue
+                result["files"].append(
+                    {"field": name, "filename": safe_filename(filename), "data": content}
+                )
+            else:
+                result[name] = content.decode("utf-8", errors="replace")
         return result
 
     def handle_format(self, fields: dict) -> None:
@@ -211,6 +245,25 @@ class Handler(BaseHTTPRequestHandler):
         job_id = store.add("review", result["title"], result)
         result["id"] = job_id
         result["items"] = serialize_items(items)
+        self.send_payload(HTTPStatus.OK, result)
+
+    def handle_check_citations(self, fields: dict) -> None:
+        files = fields["files"]
+        if not files:
+            raise ValueError("请上传一篇需要检查引用的文稿。")
+        uploaded = files[0]
+        text = extract_text(uploaded["filename"], uploaded["data"])
+        if len(text) < 20:
+            raise ValueError("文件中可识别的正文过少，请检查文件内容。")
+        style = fields.get("style", "gb7714")
+        document = format_document(text, style)
+        result = document["citation_check"]
+        result["title"] = document["title"]
+        result["reference_count"] = document["reference_count"]
+        result["references"] = [
+            {"index": ref["index"], "title": ref["title"], "year": ref["year"], "authors": ref["authors"]}
+            for ref in document["references"]
+        ]
         self.send_payload(HTTPStatus.OK, result)
 
 
