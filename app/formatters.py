@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import re
 from typing import Iterable
 
@@ -42,6 +42,8 @@ class Reference:
     url: str = ""
     reference_type: str = "journal"
     confidence: str = "medium"
+    errors: list = field(default_factory=list)
+    author_list: list = field(default_factory=list)
 
 
 def _normalize_spaces(value: str) -> str:
@@ -62,27 +64,37 @@ def _extract_url(line: str) -> str:
     return match.group(0).rstrip(".,);]")
 
 
-def _extract_volume_issue_pages(line: str) -> tuple[str, str, str]:
+def _extract_volume_issue_pages(line: str) -> tuple[str, str, str, str]:
     volume = issue = pages = ""
+    remaining = line
+
     combined = re.search(
         r"\b(\d+)\s*[\(\[]\s*(\d+)\s*[\)\]]\s*[:：]?\s*(\d+\s*[-–—]\s*\d+|\d+)",
-        line,
+        remaining,
     )
     if combined:
         volume = combined.group(1)
         issue = combined.group(2)
         pages = combined.group(3).replace("–", "-").replace("—", "-").strip()
-        return volume, issue, pages
-    vol_match = re.search(r"\bvol\.?\s*(\d+)", line, re.I)
+        remaining = remaining[: combined.start()] + remaining[combined.end():]
+        return volume, issue, pages, _normalize_spaces(remaining)
+
+    vol_match = re.search(r"\bvol\.?\s*(\d+)", remaining, re.I)
     if vol_match:
         volume = vol_match.group(1)
-    issue_match = re.search(r"\b(?:no|num)\.?\s*(\d+)", line, re.I)
+        remaining = remaining[: vol_match.start()] + remaining[vol_match.end():]
+
+    issue_match = re.search(r"\b(?:no|num)\.?\s*(\d+)", remaining, re.I)
     if issue_match:
         issue = issue_match.group(1)
-    pages_match = re.search(r"\bpp\.?\s*(\d+\s*[-–—]\s*\d+|\d+)", line, re.I)
+        remaining = remaining[: issue_match.start()] + remaining[issue_match.end():]
+
+    pages_match = re.search(r"\bpp\.?\s*(\d+\s*[-–—]\s*\d+|\d+)", remaining, re.I)
     if pages_match:
         pages = pages_match.group(1).replace("–", "-").replace("—", "-").strip()
-    return volume, issue, pages
+        remaining = remaining[: pages_match.start()] + remaining[pages_match.end():]
+
+    return volume, issue, pages, _normalize_spaces(remaining)
 
 
 def _detect_reference_type(line: str, has_url: bool) -> str:
@@ -112,55 +124,181 @@ def _confidence_level(authors: str, year: str, title: str, source: str, extra: i
     return "low"
 
 
-def parse_reference(raw: str, index: int, style: str) -> Reference:
-    line = re.sub(r"^\s*(?:\[\d+\]|\d+[.)、])\s*", "", raw)
-    line = _normalize_spaces(line)
-    doi = _extract_doi(line)
-    url = _extract_url(line)
-    volume, issue, pages = _extract_volume_issue_pages(line)
-    reference_type = _detect_reference_type(line, bool(url))
+def _is_chinese_text(text: str) -> bool:
+    chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    return chinese_chars > len(text) * 0.3 if text else False
 
-    cleaned = line
-    if doi:
-        cleaned = re.sub(re.escape(doi), "", cleaned).strip(" ,.;")
-    if url:
-        cleaned = re.sub(re.escape(url), "", cleaned).strip(" ,.;")
 
-    year_match = re.search(r"\b(19|20)\d{2}\b", cleaned)
-    year = year_match.group(0) if year_match else "n.d."
-    parts = [part.strip() for part in re.split(r"[。.!?]\s+", cleaned, maxsplit=2) if part.strip()]
-    authors = parts[0] if parts else "未知作者"
-    title = parts[1] if len(parts) > 1 else cleaned
-    source = parts[2] if len(parts) > 2 else ""
-    if source and year != "n.d.":
-        source = re.sub(rf"[,，]?\s*{re.escape(year)}\s*$", "", source).strip(" ,，")
+def split_authors(authors_str: str) -> list[str]:
+    if not authors_str or authors_str == "未知作者":
+        return []
+    s = authors_str.strip()
+    s = re.sub(r"\s*[，,]?\s*(等|et\s+al\.?)\s*\.?$", "", s, flags=re.I).strip()
+    if not s:
+        return []
 
-    extra_fields = sum(1 for value in (volume, issue, pages, doi, url) if value)
-    confidence = _confidence_level(authors, year, title, source, extra_fields)
+    if ";" in s:
+        return [a.strip() for a in s.split(";") if a.strip()]
 
+    if _is_chinese_text(s):
+        if "，" in s or "," in s:
+            parts = [a.strip() for a in re.split(r"[，,]", s) if a.strip()]
+        else:
+            parts = s.split()
+        return parts if parts else [s]
+
+    if re.match(r"^[A-Z][a-z]+,\s+[A-Z]", s):
+        chunks = re.split(r",\s+(?=[A-Z][a-z]+,\s+[A-Z]\.)", s)
+        if len(chunks) > 1:
+            return [c.strip().rstrip(",") for c in chunks if c.strip()]
+
+    parts = [a.strip() for a in re.split(r",\s*(?=[A-Z])", s) if a.strip()]
+    return parts if parts else [s]
+
+
+def _split_authors_title_source(line: str) -> tuple[str, str, str]:
+    if not line:
+        return "未知作者", "", ""
+
+    is_chinese = _is_chinese_text(line)
+    delimiter = r"[。.!?]\s+" if not is_chinese else r"[。.!?]\s+"
+    parts = [p.strip() for p in re.split(delimiter, line, maxsplit=2) if p.strip()]
+
+    if len(parts) >= 3:
+        authors = parts[0]
+        title = parts[1]
+        source = parts[2]
+    elif len(parts) == 2:
+        authors = parts[0]
+        title = parts[1]
+        source = ""
+    elif len(parts) == 1:
+        if is_chinese:
+            comma_parts = [p.strip() for p in re.split(r"[，,]", line) if p.strip()]
+            if len(comma_parts) >= 2:
+                authors = comma_parts[0]
+                title = comma_parts[1]
+                source = "，".join(comma_parts[2:]) if len(comma_parts) > 2 else ""
+            else:
+                authors = "未知作者"
+                title = line
+                source = ""
+        else:
+            authors = "未知作者"
+            title = line
+            source = ""
+    else:
+        authors = "未知作者"
+        title = ""
+        source = ""
+
+    source = source.strip(" ,，；;.")
+    return authors, title, source
+
+
+def _validate_reference(authors: str, year: str, title: str, source: str, style: str) -> list[dict]:
+    errors: list[dict] = []
+    if not authors or authors == "未知作者":
+        errors.append({"field": "authors", "message": "未识别出作者", "severity": "warning"})
+    if not title:
+        errors.append({"field": "title", "message": "未识别出题名", "severity": "warning"})
+    if style == "apa7":
+        if not year or year == "n.d.":
+            errors.append({"field": "year", "message": "APA 7 要求标注年份，缺失时应用 (n.d.)", "severity": "info"})
+    elif style == "ieee":
+        if not source:
+            errors.append({"field": "source", "message": "IEEE 要求标注来源（期刊/会议）", "severity": "info"})
+    elif style == "gb7714":
+        if not source:
+            errors.append({"field": "source", "message": "GB/T 7714 建议标注来源", "severity": "info"})
+    return errors
+
+
+def _format_reference(
+    index: int, authors: str, year: str, title: str, source: str,
+    volume: str, issue: str, pages: str, doi: str, url: str, style: str,
+) -> str:
     if style == "apa7":
         formatted = f"{authors} ({year}). {title}."
         if source:
-            formatted += f" {source}."
+            formatted += f" {source}"
+            if volume:
+                formatted += f", {volume}"
+                if issue:
+                    formatted += f"({issue})"
+            if pages:
+                formatted += f", {pages}"
+        formatted += "."
     elif style == "ieee":
-        formatted = f"[{index}] {authors}, \"{title},\""
+        formatted = f'[{index}] {authors}, "{title},"'
         if source:
-            formatted += f" {source},"
-        formatted += f" {year}."
+            formatted += f" {source}"
+            if volume:
+                formatted += f", vol. {volume}"
+            if issue:
+                formatted += f", no. {issue}"
+            if pages:
+                formatted += f", pp. {pages}"
+        formatted += f", {year}."
     else:
         formatted = f"{index}. {authors}. {title}"
         if source:
             formatted += f". {source}"
+            if volume:
+                formatted += f", {volume}"
+                if issue:
+                    formatted += f"({issue})"
+            if pages:
+                formatted += f": {pages}"
         formatted += f", {year}."
     if doi:
         formatted += f" DOI: {doi}."
     elif url:
         formatted += f" URL: {url}."
+    return formatted
+
+
+def parse_reference(raw: str, index: int, style: str) -> Reference:
+    original = raw
+    line = re.sub(r"^\s*(?:\[\d+\]|\d+[.)、])\s*", "", raw)
+    line = _normalize_spaces(line)
+    errors: list[dict] = []
+
+    doi = _extract_doi(line)
+    if doi:
+        line = re.sub(re.escape(doi), "", line).strip(" ,.;；")
+
+    url = _extract_url(line)
+    if url:
+        line = re.sub(re.escape(url), "", line).strip(" ,.;；")
+
+    volume, issue, pages, line = _extract_volume_issue_pages(line)
+
+    year_match = re.search(r"\b(19|20)\d{2}[a-z]?\b", line)
+    year = year_match.group(0) if year_match else ""
+    if year:
+        line = re.sub(rf"\b{re.escape(year)}\b", "", line).strip(" ,.;；，")
+    if not year:
+        year = "n.d."
+        errors.append({"field": "year", "message": "未识别出出版年份", "severity": "warning"})
+
+    authors, title, source = _split_authors_title_source(line)
+    author_list = split_authors(authors)
+
+    reference_type = _detect_reference_type(original, bool(url))
+    extra_fields = sum(1 for value in (volume, issue, pages, doi, url) if value)
+    confidence = _confidence_level(authors, year, title, source, extra_fields)
+    if confidence == "low":
+        errors.append({"field": "overall", "message": "解析置信度较低，请人工核对", "severity": "warning"})
+
+    formatted = _format_reference(index, authors, year, title, source, volume, issue, pages, doi, url, style)
+    errors.extend(_validate_reference(authors, year, title, source, style))
 
     return Reference(
         index, raw, authors, year, title, source, formatted,
         reference_type=reference_type, volume=volume, issue=issue,
         pages=pages, doi=doi, url=url, confidence=confidence,
+        errors=errors, author_list=author_list,
     )
 
 
@@ -184,13 +322,15 @@ def format_references(text: str, style: str = "gb7714") -> tuple[list[Reference]
             warnings.append(f"第 {reference.index} 条未识别出出版年份。")
         if reference.confidence == "low":
             warnings.append(f"第 {reference.index} 条解析置信度较低，请人工核对。")
+        for err in reference.errors:
+            if err["severity"] == "warning" and err["field"] != "year" and err["field"] != "overall":
+                warnings.append(f"第 {reference.index} 条{err['message']}。")
     if not references:
-        warnings.append("未识别到参考文献，请确认正文中包含“参考文献”章节。")
+        warnings.append("未识别到参考文献，请确认正文中包含\u201c参考文献\u201d章节。")
     return references, warnings
 
 
 def extract_inline_citations(body_text: str) -> list[dict]:
-    """识别正文中的数字引用和作者年份引用。"""
     citations: list[dict] = []
 
     for match in re.finditer(r"\[(\d+(?:\s*[-–—]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–—]\s*\d+)?)*)\]", body_text):
@@ -218,7 +358,6 @@ def _expand_citation_token(token: str) -> list[int]:
 
 
 def check_citations(body_text: str, references: list[Reference]) -> dict:
-    """比对正文引用与参考文献列表。"""
     citations = extract_inline_citations(body_text)
     numeric_citations = [c["value"] for c in citations if c["type"] == "numeric"]
     author_year_citations = [c["value"] for c in citations if c["type"] == "author-year"]

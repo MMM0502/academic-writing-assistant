@@ -219,6 +219,72 @@ class ApiEndToEndTests(unittest.TestCase):
         status, payload = self.request("/api/nonexistent")
         self.assertEqual(status, 404)
 
+    def test_format_returns_structure(self):
+        status, payload = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.txt", SAMPLE_PAPER)]
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("structure", payload)
+        self.assertIn("sections", payload["structure"])
+        self.assertIn("missing_sections", payload["structure"])
+
+    def test_format_returns_preserve_available_for_txt(self):
+        status, payload = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.txt", SAMPLE_PAPER)]
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["preserve_available"])
+
+    def test_format_returns_preserve_available_for_docx(self):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            "<w:body><w:p><w:r><w:t>测试论文标题</w:t></w:r></w:p>"
+            '<w:p><w:r><w:t>摘要</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>这是足够长的正文内容用于通过长度检查。</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>参考文献</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>1. 作者. 题名. 期刊, 2024.</w:t></w:r></w:p>'
+            "</w:body></w:document>"
+        )
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("word/document.xml", xml)
+        docx_data = output.getvalue()
+
+        status, payload = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.docx", docx_data)]
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["preserve_available"])
+
+    def test_download_preserve_mode(self):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            "<w:body><w:p><w:r><w:t>测试论文标题</w:t></w:r></w:p>"
+            '<w:p><w:r><w:t>这是足够长的正文内容用于通过长度检查。</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>参考文献</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>1. 作者. 题名. 期刊, 2024.</w:t></w:r></w:p>'
+            "</w:body></w:document>"
+        )
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("word/document.xml", xml)
+        docx_data = output.getvalue()
+
+        status, payload = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.docx", docx_data)]
+        )
+        self.assertEqual(status, 200)
+        job_id = payload["id"]
+
+        status, docx = self.request(f"/api/download/{job_id}?format=docx&mode=preserve")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(docx, bytes)
+        self.assertTrue(docx.startswith(b"PK\x03\x04"))
+        with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+            self.assertIn("word/document.xml", archive.namelist())
+
 
 if __name__ == "__main__":
     unittest.main()

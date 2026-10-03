@@ -10,9 +10,9 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 from .config import settings
-from .exporters import download_name, format_result_to_docx, markdown_to_docx
+from .exporters import download_name, format_result_to_docx, markdown_to_docx, preserve_original_docx
 from .formatters import REFERENCE_TYPE_LABELS, STYLE_LABELS, check_citations, format_document, format_references
-from .parsers import extract_text
+from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
 
@@ -103,9 +103,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         payload = job["payload"]
         content = payload.get("formatted_text") or payload.get("markdown") or ""
-        output_format = (query or {}).get("format", ["md"])[0].lower()
+        query = query or {}
+        output_format = query.get("format", ["md"])[0].lower()
+        mode = query.get("mode", ["rebuild"])[0].lower()
         if output_format == "docx":
-            body = (format_result_to_docx(payload) if payload.get("kind") == "format" else markdown_to_docx(content, payload.get("title", job["title"]), payload.get("style", "")))
+            if mode == "preserve" and payload.get("source_data"):
+                import base64
+                original_data = base64.b64decode(payload["source_data"])
+                body = preserve_original_docx(original_data, payload)
+            elif payload.get("kind") == "format":
+                body = format_result_to_docx(payload)
+            else:
+                body = markdown_to_docx(content, payload.get("title", job["title"]), payload.get("style", ""))
             filename = download_name(job["title"], "docx")
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         else:
@@ -219,6 +228,13 @@ class Handler(BaseHTTPRequestHandler):
         result = format_document(text, style)
         result["source_name"] = uploaded["filename"]
         result["kind"] = "format"
+        result["structure"] = extract_structure(text)
+        if uploaded["filename"].lower().endswith(".docx"):
+            import base64
+            result["source_data"] = base64.b64encode(uploaded["data"]).decode("ascii")
+            result["preserve_available"] = True
+        else:
+            result["preserve_available"] = False
         job_id = store.add("format", result["title"], result)
         result["id"] = job_id
         self.send_payload(HTTPStatus.OK, result)
