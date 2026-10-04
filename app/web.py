@@ -16,10 +16,12 @@ from .llm import get_status as get_llm_status
 from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
+from . import auth, journals, stats
 
 
 ROOT = Path(__file__).resolve().parent
 store = Store(settings.data_dir / "academic_assistant.sqlite3")
+journals.init_builtin_styles(store)
 
 
 def json_bytes(payload: dict) -> bytes:
@@ -46,6 +48,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _get_current_user(self) -> dict | None:
+        token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not token:
+            cookie = self.headers.get("Cookie", "")
+            token_match = re.search(r"auth_token=([^;]+)", cookie)
+            token = token_match.group(1) if token_match else ""
+        return auth.get_current_user(store, token)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/":
@@ -58,7 +68,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_payload(HTTPStatus.NOT_FOUND, {"error": "资源不存在"})
         elif parsed.path == "/api/history":
-            self.send_payload(HTTPStatus.OK, {"items": store.list()})
+            user = self._get_current_user()
+            user_id = user["user_id"] if user else None
+            self.send_payload(HTTPStatus.OK, {"items": store.list(user_id=user_id)})
         elif parsed.path.startswith("/api/history/"):
             try:
                 job_id = int(parsed.path.rsplit("/", 1)[-1])
@@ -82,6 +94,47 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif parsed.path == "/api/llm-status":
             self.send_payload(HTTPStatus.OK, get_llm_status())
+        elif parsed.path == "/api/auth/me":
+            user = self._get_current_user()
+            if user:
+                self.send_payload(HTTPStatus.OK, {"user_id": user["user_id"], "username": user["username"], "role": user["role"]})
+            else:
+                self.send_payload(HTTPStatus.OK, {"user": None})
+        elif parsed.path == "/api/journal-styles":
+            self.send_payload(HTTPStatus.OK, {"styles": journals.list_styles(store)})
+        elif parsed.path.startswith("/api/journal-styles/"):
+            try:
+                style_id = int(parsed.path.rsplit("/", 1)[-1])
+            except ValueError:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "格式编号无效"})
+                return
+            style = journals.get_style(store, style_id)
+            if not style:
+                self.send_payload(HTTPStatus.NOT_FOUND, {"error": "格式不存在"})
+            else:
+                self.send_payload(HTTPStatus.OK, style)
+        elif parsed.path == "/api/stats":
+            user = self._get_current_user()
+            user_id = user["user_id"] if user else None
+            self.send_payload(HTTPStatus.OK, stats.get_stats(store, user_id=user_id))
+        elif parsed.path == "/api/comments":
+            job_id_str = parse_qs(parsed.query).get("job_id", [""])[0]
+            if not job_id_str:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "缺少 job_id"})
+                return
+            self.send_payload(HTTPStatus.OK, {"comments": store.list_comments(int(job_id_str))})
+        elif parsed.path == "/api/shares":
+            user = self._get_current_user()
+            if not user:
+                self.send_payload(HTTPStatus.UNAUTHORIZED, {"error": "请先登录"})
+                return
+            self.send_payload(HTTPStatus.OK, {"shares": store.list_shares(user["user_id"])})
+        elif parsed.path == "/api/users":
+            user = self._get_current_user()
+            if not user or user["role"] != "teacher":
+                self.send_payload(HTTPStatus.FORBIDDEN, {"error": "仅教师可查看用户列表"})
+                return
+            self.send_payload(HTTPStatus.OK, {"users": store.list_users()})
         else:
             self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
 
@@ -146,30 +199,140 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    JSON_POST_PATHS = {
+        "/api/auth/register", "/api/auth/login", "/api/auth/logout",
+        "/api/journal-styles", "/api/comments", "/api/shares",
+    }
+    MULTIPART_POST_PATHS = {
+        "/api/format", "/api/review", "/api/check-citations", "/api/review/edit",
+    }
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/format", "/api/review", "/api/check-citations", "/api/review/edit"}:
-            self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
+        if parsed.path in self.JSON_POST_PATHS:
+            try:
+                data = self.parse_json_body()
+                if parsed.path == "/api/auth/register":
+                    self.handle_register(data)
+                elif parsed.path == "/api/auth/login":
+                    self.handle_login(data)
+                elif parsed.path == "/api/auth/logout":
+                    self.handle_logout()
+                elif parsed.path == "/api/journal-styles":
+                    self.handle_create_journal_style(data)
+                elif parsed.path == "/api/comments":
+                    self.handle_add_comment(data)
+                elif parsed.path == "/api/shares":
+                    self.handle_create_share(data)
+            except ValueError as exc:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except Exception as exc:
+                self.send_payload(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"处理失败：{exc}"})
             return
+        if parsed.path in self.MULTIPART_POST_PATHS:
+            try:
+                fields = self.parse_multipart()
+                if parsed.path == "/api/format":
+                    self.handle_format(fields)
+                elif parsed.path == "/api/check-citations":
+                    self.handle_check_citations(fields)
+                elif parsed.path == "/api/review/edit":
+                    self.handle_review_edit(fields)
+                else:
+                    self.handle_review(fields)
+            except ValueError as exc:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except Exception as exc:
+                self.send_payload(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"处理失败：{exc}"})
+            return
+        self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
+
+    def parse_json_body(self) -> dict:
+        content_length = int(self.headers.get("Content-Length", "0"))
+        if content_length <= 0:
+            return {}
+        body = self.rfile.read(content_length)
+        if not body:
+            return {}
         try:
-            fields = self.parse_multipart()
-            if parsed.path == "/api/format":
-                self.handle_format(fields)
-            elif parsed.path == "/api/check-citations":
-                self.handle_check_citations(fields)
-            elif parsed.path == "/api/review/edit":
-                self.handle_review_edit(fields)
-            else:
-                self.handle_review(fields)
-        except ValueError as exc:
-            self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-        except Exception as exc:
-            self.send_payload(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"处理失败：{exc}"})
+            data = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError(f"JSON 解析失败：{exc}")
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON 对象。")
+        return data
+
+    def handle_register(self, data: dict) -> None:
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        role = data.get("role", "student").strip()
+        result = auth.register(store, username, password, role)
+        self.send_payload(HTTPStatus.CREATED, result)
+
+    def handle_login(self, data: dict) -> None:
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        result = auth.login(store, username, password)
+        self.send_payload(HTTPStatus.OK, result)
+
+    def handle_logout(self) -> None:
+        token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not token:
+            cookie = self.headers.get("Cookie", "")
+            token_match = re.search(r"auth_token=([^;]+)", cookie)
+            token = token_match.group(1) if token_match else ""
+        if token:
+            auth.logout(store, token)
+        self.send_payload(HTTPStatus.OK, {"message": "已登出"})
+
+    def handle_create_journal_style(self, data: dict) -> None:
+        user = self._get_current_user()
+        created_by = user["user_id"] if user else None
+        name = data.get("name", "").strip()
+        publisher = data.get("publisher", "").strip()
+        rules = data.get("rules", {})
+        if not isinstance(rules, dict):
+            raise ValueError("格式规则必须是 JSON 对象。")
+        style_id = journals.create_custom_style(store, name, rules, publisher=publisher, created_by=created_by)
+        style = journals.get_style(store, style_id)
+        self.send_payload(HTTPStatus.CREATED, style)
+
+    def handle_add_comment(self, data: dict) -> None:
+        user = self._get_current_user()
+        if not user:
+            self.send_payload(HTTPStatus.UNAUTHORIZED, {"error": "请先登录"})
+            return
+        job_id = data.get("job_id")
+        content = data.get("content", "").strip()
+        if not job_id:
+            raise ValueError("缺少 job_id。")
+        if not content:
+            raise ValueError("评论内容不能为空。")
+        comment_id = store.add_comment(int(job_id), user["user_id"], content)
+        comments = store.list_comments(int(job_id))
+        self.send_payload(HTTPStatus.CREATED, {"id": comment_id, "comments": comments})
+
+    def handle_create_share(self, data: dict) -> None:
+        user = self._get_current_user()
+        if not user:
+            self.send_payload(HTTPStatus.UNAUTHORIZED, {"error": "请先登录"})
+            return
+        job_id = data.get("job_id")
+        shared_with_id = data.get("shared_with_id")
+        permission = data.get("permission", "view").strip()
+        if not job_id:
+            raise ValueError("缺少 job_id。")
+        if permission not in ("view", "edit"):
+            raise ValueError("权限只能是 view 或 edit。")
+        share_id = store.create_share(int(job_id), user["user_id"], int(shared_with_id) if shared_with_id else None, permission)
+        self.send_payload(HTTPStatus.CREATED, {"id": share_id, "message": "分享已创建"})
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/history":
-            removed = store.clear()
+            user = self._get_current_user()
+            user_id = user["user_id"] if user else None
+            removed = store.clear(user_id=user_id)
             self.send_payload(HTTPStatus.OK, {"removed": removed})
             return
         if parsed.path.startswith("/api/history/"):
@@ -182,6 +345,39 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_payload(HTTPStatus.OK, {"removed": job_id})
             else:
                 self.send_payload(HTTPStatus.NOT_FOUND, {"error": "记录不存在"})
+            return
+        if parsed.path.startswith("/api/journal-styles/"):
+            try:
+                style_id = int(parsed.path.rsplit("/", 1)[-1])
+            except ValueError:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "格式编号无效"})
+                return
+            if journals.delete_custom_style(store, style_id):
+                self.send_payload(HTTPStatus.OK, {"removed": style_id})
+            else:
+                self.send_payload(HTTPStatus.NOT_FOUND, {"error": "格式不存在或为内置格式，无法删除"})
+            return
+        if parsed.path.startswith("/api/comments/"):
+            try:
+                comment_id = int(parsed.path.rsplit("/", 1)[-1])
+            except ValueError:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "评论编号无效"})
+                return
+            if store.delete_comment(comment_id):
+                self.send_payload(HTTPStatus.OK, {"removed": comment_id})
+            else:
+                self.send_payload(HTTPStatus.NOT_FOUND, {"error": "评论不存在"})
+            return
+        if parsed.path.startswith("/api/shares/"):
+            try:
+                share_id = int(parsed.path.rsplit("/", 1)[-1])
+            except ValueError:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "分享编号无效"})
+                return
+            if store.delete_share(share_id):
+                self.send_payload(HTTPStatus.OK, {"removed": share_id})
+            else:
+                self.send_payload(HTTPStatus.NOT_FOUND, {"error": "分享不存在"})
             return
         self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
 
@@ -250,7 +446,9 @@ class Handler(BaseHTTPRequestHandler):
             result["preserve_available"] = True
         else:
             result["preserve_available"] = False
-        job_id = store.add("format", result["title"], result)
+        user = self._get_current_user()
+        user_id = user["user_id"] if user else None
+        job_id = store.add("format", result["title"], result, user_id=user_id)
         result["id"] = job_id
         self.send_payload(HTTPStatus.OK, result)
 
@@ -273,7 +471,9 @@ class Handler(BaseHTTPRequestHandler):
         result["source_names"] = [item["filename"] for item in fields["files"]]
         result["skipped"] = skipped
         result["kind"] = "review"
-        job_id = store.add("review", result["title"], result)
+        user = self._get_current_user()
+        user_id = user["user_id"] if user else None
+        job_id = store.add("review", result["title"], result, user_id=user_id)
         result["id"] = job_id
         result["items"] = serialize_items(items)
         self.send_payload(HTTPStatus.OK, result)

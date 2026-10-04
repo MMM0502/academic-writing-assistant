@@ -13,6 +13,7 @@ from xml.etree import ElementTree
 
 from app import web
 from app.storage import Store
+from app import journals
 
 
 def _multipart(fields: dict, files: list[tuple[str, str, bytes]]) -> tuple[bytes, str]:
@@ -50,6 +51,7 @@ class ApiEndToEndTests(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
         web.store = Store(Path(cls._tmp.name) / "test.sqlite3")
+        journals.init_builtin_styles(web.store)
         cls._server = web.ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
         cls.base_url = f"http://127.0.0.1:{cls._server.server_address[1]}"
         cls._thread = threading.Thread(target=cls._server.serve_forever, daemon=True)
@@ -350,6 +352,165 @@ class ApiEndToEndTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result["markdown"], edited_md)
         self.assertEqual(result["engine"], "user-edited")
+
+    def test_auth_register_and_login(self):
+        body = json.dumps({"username": "testuser1", "password": "pass1234", "role": "student"}).encode()
+        status, payload = self.request("/api/auth/register", "POST", body)
+        self.assertEqual(status, 201)
+        self.assertIn("token", payload)
+        self.assertEqual(payload["username"], "testuser1")
+        token = payload["token"]
+
+        body = json.dumps({"username": "testuser1", "password": "pass1234"}).encode()
+        status, payload = self.request("/api/auth/login", "POST", body)
+        self.assertEqual(status, 200)
+        self.assertIn("token", payload)
+
+        status, payload = self.request("/api/auth/me", "GET", None)
+        self.assertEqual(status, 200)
+
+    def test_auth_register_duplicate(self):
+        body = json.dumps({"username": "dupuser", "password": "pass1234"}).encode()
+        status, _ = self.request("/api/auth/register", "POST", body)
+        self.assertEqual(status, 201)
+        status, payload = self.request("/api/auth/register", "POST", body)
+        self.assertEqual(status, 400)
+        self.assertIn("error", payload)
+
+    def test_auth_login_wrong_password(self):
+        body = json.dumps({"username": "wrongpw", "password": "pass1234"}).encode()
+        self.request("/api/auth/register", "POST", body)
+        body = json.dumps({"username": "wrongpw", "password": "wrongpass"}).encode()
+        status, payload = self.request("/api/auth/login", "POST", body)
+        self.assertEqual(status, 400)
+        self.assertIn("error", payload)
+
+    def test_auth_register_short_password(self):
+        body = json.dumps({"username": "shortpw", "password": "ab"}).encode()
+        status, payload = self.request("/api/auth/register", "POST", body)
+        self.assertEqual(status, 400)
+        self.assertIn("error", payload)
+
+    def test_journal_styles_list(self):
+        status, payload = self.request("/api/journal-styles")
+        self.assertEqual(status, 200)
+        self.assertIn("styles", payload)
+        self.assertGreater(len(payload["styles"]), 0)
+        self.assertTrue(any(s["name"] == "Nature" for s in payload["styles"]))
+
+    def test_journal_style_get_detail(self):
+        status, payload = self.request("/api/journal-styles")
+        style_id = payload["styles"][0]["id"]
+        status, payload = self.request(f"/api/journal-styles/{style_id}")
+        self.assertEqual(status, 200)
+        self.assertIn("rules", payload)
+
+    def test_journal_style_create_and_delete(self):
+        rules = {"author_format": "surname_initial", "max_authors_et_al": 5}
+        body = json.dumps({"name": "Test Custom Style", "publisher": "TestPub", "rules": rules}).encode()
+        status, payload = self.request("/api/journal-styles", "POST", body)
+        self.assertEqual(status, 201)
+        self.assertEqual(payload["name"], "Test Custom Style")
+        self.assertFalse(payload["is_builtin"])
+        style_id = payload["id"]
+
+        status, payload = self.request(f"/api/journal-styles/{style_id}", "DELETE")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["removed"], style_id)
+
+    def test_journal_style_delete_builtin_fails(self):
+        status, payload = self.request("/api/journal-styles")
+        builtin = next(s for s in payload["styles"] if s["is_builtin"])
+        status, payload = self.request(f"/api/journal-styles/{builtin['id']}", "DELETE")
+        self.assertEqual(status, 404)
+
+    def test_stats(self):
+        status, payload = self.request("/api/stats")
+        self.assertEqual(status, 200)
+        self.assertIn("total_jobs", payload)
+        self.assertIn("format_jobs", payload)
+        self.assertIn("review_jobs", payload)
+        self.assertIn("llm_calls", payload)
+
+    def test_comments_require_auth(self):
+        body = json.dumps({"job_id": 1, "content": "test comment"}).encode()
+        status, payload = self.request("/api/comments", "POST", body)
+        self.assertEqual(status, 401)
+
+    def test_comments_add_and_list(self):
+        reg_body = json.dumps({"username": "commenter", "password": "pass1234"}).encode()
+        status, reg = self.request("/api/auth/register", "POST", reg_body)
+        token = reg["token"]
+
+        status, fmt = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.txt", SAMPLE_PAPER)]
+        )
+        job_id = fmt["id"]
+
+        body = json.dumps({"job_id": job_id, "content": "这是一条评论"}).encode()
+        req = urllib.request.Request(self.base_url + "/api/comments", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        self.assertEqual(payload["id"], 1)
+        self.assertGreater(len(payload["comments"]), 0)
+
+        status, payload = self.request(f"/api/comments?job_id={job_id}")
+        self.assertEqual(status, 200)
+        self.assertGreater(len(payload["comments"]), 0)
+
+    def test_shares_require_auth(self):
+        status, payload = self.request("/api/shares")
+        self.assertEqual(status, 401)
+
+    def test_shares_create_and_list(self):
+        reg_body = json.dumps({"username": "sharer", "password": "pass1234"}).encode()
+        status, reg = self.request("/api/auth/register", "POST", reg_body)
+        token = reg["token"]
+
+        status, fmt = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.txt", SAMPLE_PAPER)]
+        )
+        job_id = fmt["id"]
+
+        body = json.dumps({"job_id": job_id, "permission": "view"}).encode()
+        req = urllib.request.Request(self.base_url + "/api/shares", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        self.assertIn("id", payload)
+
+        req = urllib.request.Request(self.base_url + "/api/shares", method="GET")
+        req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        self.assertGreater(len(payload["shares"]), 0)
+
+    def test_users_teacher_only(self):
+        reg_body = json.dumps({"username": "student1", "password": "pass1234", "role": "student"}).encode()
+        status, reg = self.request("/api/auth/register", "POST", reg_body)
+        token = reg["token"]
+
+        req = urllib.request.Request(self.base_url + "/api/users", method="GET")
+        req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        self.assertEqual(status, 403)
+
+        reg_body = json.dumps({"username": "teacher1", "password": "pass1234", "role": "teacher"}).encode()
+        status, reg = self.request("/api/auth/register", "POST", reg_body)
+        token = reg["token"]
+
+        req = urllib.request.Request(self.base_url + "/api/users", method="GET")
+        req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        self.assertIn("users", payload)
 
 
 if __name__ == "__main__":

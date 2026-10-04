@@ -144,3 +144,19 @@ select:focus, input[type=text]:focus { border-color: var(--teal); }
 .dropdown-menu.show { display: block; }
 .dropdown-menu a { display: block; padding: 8px 14px; color: var(--ink); text-decoration: none; font-size: 13px; }
 .dropdown-menu a:hover { background: var(--soft-teal); color: var(--teal-dark); }
+
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-content { background: var(--panel); border-radius: 12px; padding: 24px; width: 360px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.modal-header h3 { margin: 0; font-family: Georgia, serif; }
+#auth-form .field { display: block; margin-bottom: 12px; }
+#auth-form .field span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+#auth-form input, #auth-form select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+
+#user-area { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--ink); }
+#user-display { font-weight: 600; }
+
+.journal-style-form { background: var(--soft-teal); border-radius: 10px; padding: 16px; }
+.journal-style-form .field { display: block; margin-bottom: 10px; }
+.journal-style-form .field span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.journal-style-form input, .journal-style-form select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }

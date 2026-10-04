@@ -39,6 +39,8 @@ function activateTabs() {
       tab.classList.add("active");
       $(`#panel-${tab.dataset.tab}`).classList.add("active");
       if (tab.dataset.tab === "history") loadHistory();
+      if (tab.dataset.tab === "journals") loadJournalStyles();
+      if (tab.dataset.tab === "stats") loadStats();
     });
   });
 }
@@ -268,3 +270,197 @@ $("#review-form").addEventListener("submit", (event) => {
 });
 $("#refresh-history").addEventListener("click", loadHistory);
 loadHistory();
+
+let authToken = null;
+let currentUser = null;
+
+function getAuthHeaders() {
+  const headers = {};
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  return headers;
+}
+
+async function checkAuth() {
+  try {
+    const response = await fetch("/api/auth/me");
+    const data = await response.json();
+    if (data.user_id) {
+      currentUser = data;
+      updateUserUI();
+    }
+  } catch {}
+}
+
+function updateUserUI() {
+  if (currentUser) {
+    $("#auth-area").style.display = "none";
+    $("#user-area").style.display = "inline";
+    $("#user-display").textContent = `${currentUser.username}（${currentUser.role === "teacher" ? "教师" : "学生"}）`;
+  } else {
+    $("#auth-area").style.display = "inline";
+    $("#user-area").style.display = "none";
+    $("#user-display").textContent = "";
+  }
+}
+
+function showAuthModal(mode) {
+  const modal = $("#auth-modal");
+  const title = $("#auth-modal-title");
+  const roleField = $("#role-field");
+  const submitBtn = $("#auth-submit-btn");
+  modal.style.display = "flex";
+  if (mode === "register") {
+    title.textContent = "注册";
+    roleField.style.display = "block";
+    submitBtn.textContent = "注册";
+  } else {
+    title.textContent = "登录";
+    roleField.style.display = "none";
+    submitBtn.textContent = "登录";
+  }
+  modal.dataset.mode = mode;
+}
+
+function closeAuthModal() {
+  $("#auth-modal").style.display = "none";
+  $("#auth-form").reset();
+}
+
+$("#show-login-btn").addEventListener("click", () => showAuthModal("login"));
+$("#show-register-btn").addEventListener("click", () => showAuthModal("register"));
+$("#close-auth-modal").addEventListener("click", closeAuthModal);
+$("#logout-btn").addEventListener("click", async () => {
+  try {
+    await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json", ...getAuthHeaders() } });
+  } catch {}
+  authToken = null;
+  currentUser = null;
+  updateUserUI();
+  showToast("已登出");
+});
+
+$("#auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const mode = $("#auth-modal").dataset.mode;
+  const data = {
+    username: form.username.value.trim(),
+    password: form.password.value,
+  };
+  if (mode === "register") data.role = form.role.value;
+  try {
+    const response = await fetch(`/api/auth/${mode}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "操作失败");
+    authToken = payload.token;
+    currentUser = { user_id: payload.user_id, username: payload.username, role: payload.role };
+    updateUserUI();
+    closeAuthModal();
+    showToast(`${mode === "register" ? "注册" : "登录"}成功`);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+async function loadJournalStyles() {
+  const target = $("#journal-list");
+  try {
+    const response = await fetch("/api/journal-styles");
+    const data = await response.json();
+    if (!data.styles.length) {
+      target.innerHTML = '<div class="empty-state">暂无期刊格式。</div>';
+      return;
+    }
+    target.innerHTML = data.styles.map((style) => `
+      <div class="history-item">
+        <div>
+          <span class="history-type">${style.is_builtin ? "内置" : "自定义"}</span>
+          <h3>${escapeHtml(style.name)}</h3>
+          <p>${escapeHtml(style.publisher || "未知出版机构")}</p>
+        </div>
+        <div>${style.is_builtin ? "" : `<button class="small-button" onclick="deleteJournalStyle(${style.id})">删除</button>`}</div>
+      </div>`).join("");
+  } catch {
+    target.innerHTML = '<div class="warning">期刊格式加载失败。</div>';
+  }
+}
+
+async function deleteJournalStyle(id) {
+  try {
+    const response = await fetch(`/api/journal-styles/${id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "删除失败");
+    }
+    showToast("已删除");
+    loadJournalStyles();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+$("#journal-style-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const rules = {
+    author_format: form.author_format.value,
+    author_separator: ", ",
+    max_authors_et_al: parseInt(form.max_authors_et_al.value, 10),
+    year_format: form.year_format.value,
+    title_case: form.title_case.value,
+    journal_italic: true,
+    volume_bold: false,
+    pages_prefix: "pp.",
+    number_prefix: "",
+    doi_prefix: "doi:",
+  };
+  try {
+    const response = await fetch("/api/journal-styles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ name: form.name.value, publisher: form.publisher.value, rules }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "创建失败");
+    showToast("自定义格式已保存");
+    form.reset();
+    loadJournalStyles();
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+async function loadStats() {
+  const target = $("#stats-content");
+  try {
+    const response = await fetch("/api/stats", { headers: getAuthHeaders() });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "加载失败");
+    const styleDist = Object.entries(data.style_distribution || {}).map(([k, v]) => `<span class="chip">${escapeHtml(k)}: ${v}</span>`).join("");
+    target.innerHTML = `
+      <div class="metrics">
+        <div class="metric"><strong>${data.total_jobs}</strong><span>总处理量</span></div>
+        <div class="metric"><strong>${data.format_jobs}</strong><span>文稿规整</span></div>
+        <div class="metric"><strong>${data.review_jobs}</strong><span>综述生成</span></div>
+        <div class="metric"><strong>${data.recent_day}</strong><span>近 24 小时</span></div>
+        <div class="metric"><strong>${data.recent_week}</strong><span>近 7 天</span></div>
+        <div class="metric"><strong>${data.total_references}</strong><span>参考文献总数</span></div>
+        <div class="metric"><strong>${data.total_warnings}</strong><span>纠错警告</span></div>
+        <div class="metric"><strong>${data.duplicate_warnings}</strong><span>重复引用</span></div>
+      </div>
+      <div class="result-card" style="margin-top:1rem;">
+        <p class="meta-label">引用规范分布</p>
+        <div class="chips">${styleDist || "暂无数据"}</div>
+        <p class="meta-label" style="margin-top:1rem;">大模型调用</p>
+        <p>调用次数：${data.llm_calls} · 失败：${data.llm_failures} · 成功率：${data.llm_success_rate}% · 平均耗时：${data.avg_llm_elapsed_seconds}s</p>
+      </div>`;
+  } catch (error) {
+    target.innerHTML = `<div class="warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+checkAuth();

@@ -15,8 +15,40 @@
     <div class="topbar-actions">
       <span class="status-dot"></span><span>本地工作区</span>
       <button class="icon-button" id="refresh-history" title="刷新历史记录">↻</button>
+      <span id="auth-area">
+        <button class="small-button" id="show-login-btn">登录</button>
+        <button class="small-button" id="show-register-btn">注册</button>
+      </span>
+      <span id="user-area" style="display:none;">
+        <span id="user-display"></span>
+        <button class="small-button" id="logout-btn">登出</button>
+      </span>
     </div>
   </header>
+
+  <div id="auth-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="auth-modal-title">登录</h3>
+        <button class="icon-button" id="close-auth-modal">×</button>
+      </div>
+      <form id="auth-form">
+        <label class="field"><span>用户名</span>
+          <input type="text" name="username" required minlength="2" placeholder="至少 2 个字符">
+        </label>
+        <label class="field"><span>密码</span>
+          <input type="password" name="password" required minlength="4" placeholder="至少 4 个字符">
+        </label>
+        <label class="field" id="role-field" style="display:none;"><span>角色</span>
+          <select name="role">
+            <option value="student">学生</option>
+            <option value="teacher">教师</option>
+          </select>
+        </label>
+        <button class="primary-button" type="submit" id="auth-submit-btn">登录</button>
+      </form>
+    </div>
+  </div>
 
   <main class="shell">
     <section class="intro">
@@ -33,6 +65,8 @@
       <button class="tab active" data-tab="format"><span>01</span>文稿规整</button>
       <button class="tab" data-tab="review"><span>02</span>综述生成</button>
       <button class="tab" data-tab="history"><span>03</span>处理记录</button>
+      <button class="tab" data-tab="journals"><span>04</span>期刊格式</button>
+      <button class="tab" data-tab="stats"><span>05</span>统计看板</button>
     </nav>
 
     <section class="workspace">
@@ -90,6 +124,60 @@
           <span class="pill">仅保存在本机</span>
         </div>
         <div id="history-list" class="history-list"><div class="empty-state">正在读取记录...</div></div>
+      </div>
+
+      <div class="panel tab-panel" id="panel-journals">
+        <div class="panel-heading">
+          <div><p class="kicker">JOURNAL STYLES</p><h2>期刊格式库</h2></div>
+          <span class="pill">预设 + 自定义</span>
+        </div>
+        <div id="journal-list" class="history-list"><div class="empty-state">正在加载期刊格式...</div></div>
+        <div class="panel-heading" style="margin-top:1.5rem;">
+          <div><p class="kicker">CUSTOM STYLE</p><h2>创建自定义格式</h2></div>
+        </div>
+        <form id="journal-style-form" class="journal-style-form">
+          <label class="field"><span>格式名称</span>
+            <input type="text" name="name" required placeholder="例如：My Journal Style">
+          </label>
+          <label class="field"><span>出版机构</span>
+            <input type="text" name="publisher" placeholder="可选">
+          </label>
+          <div class="form-row">
+            <label class="field"><span>作者格式</span>
+              <select name="author_format">
+                <option value="surname_initial">姓+首字母</option>
+                <option value="initial_surname">首字母+姓</option>
+                <option value="surname_firstname">姓+名</option>
+              </select>
+            </label>
+            <label class="field"><span>et al 阈值</span>
+              <input type="number" name="max_authors_et_al" value="5" min="1" max="20">
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>年份格式</span>
+              <select name="year_format">
+                <option value="no_parentheses">无括号</option>
+                <option value="parentheses">括号包裹</option>
+              </select>
+            </label>
+            <label class="field"><span>标题大小写</span>
+              <select name="title_case">
+                <option value="sentence">句首大写</option>
+                <option value="title">标题大写</option>
+              </select>
+            </label>
+          </div>
+          <button class="primary-button" type="submit">保存自定义格式 <span>→</span></button>
+        </form>
+      </div>
+
+      <div class="panel tab-panel" id="panel-stats">
+        <div class="panel-heading">
+          <div><p class="kicker">DASHBOARD</p><h2>统计看板</h2></div>
+          <span class="pill">处理量与质量指标</span>
+        </div>
+        <div id="stats-content"><div class="empty-state">正在加载统计数据...</div></div>
       </div>
     </section>
 
