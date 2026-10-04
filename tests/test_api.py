@@ -285,6 +285,72 @@ class ApiEndToEndTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(docx)) as archive:
             self.assertIn("word/document.xml", archive.namelist())
 
+    def test_llm_status_endpoint(self):
+        status, payload = self.request("/api/llm-status")
+        self.assertEqual(status, 200)
+        self.assertIn("configured", payload)
+
+    def test_rules_include_export_formats(self):
+        status, payload = self.request("/api/rules")
+        self.assertEqual(status, 200)
+        self.assertIn("export_formats", payload)
+        self.assertIn("bibtex", payload["export_formats"])
+
+    def test_review_returns_cards(self):
+        literature = "智能代码生成方法研究\n\n本文研究代码生成问题。采用大模型方法。结果表明效果良好。".encode("utf-8")
+        status, payload = self.post_multipart(
+            "/api/review", {"topic": "智能研究"}, [("files", "a.txt", literature)]
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("cards", payload)
+        self.assertGreater(len(payload["cards"]), 0)
+
+    def test_review_returns_llm_status(self):
+        literature = "研究内容概述\n\n这是关于智能方法的详细研究内容，包含多个方面。".encode("utf-8")
+        status, payload = self.post_multipart(
+            "/api/review", {"topic": "测试"}, [("files", "a.txt", literature)]
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("llm_status", payload)
+
+    def test_download_bibtex(self):
+        status, payload = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.txt", SAMPLE_PAPER)]
+        )
+        self.assertEqual(status, 200)
+        job_id = payload["id"]
+        status, bibtex = self.request(f"/api/download/{job_id}?format=bibtex")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bibtex, bytes)
+        self.assertIn(b"@article{", bibtex)
+
+    def test_download_ris(self):
+        status, payload = self.post_multipart(
+            "/api/format", {"style": "gb7714"}, [("file", "paper.txt", SAMPLE_PAPER)]
+        )
+        self.assertEqual(status, 200)
+        job_id = payload["id"]
+        status, ris = self.request(f"/api/download/{job_id}?format=ris")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(ris, bytes)
+        self.assertIn(b"TY  -", ris)
+
+    def test_review_edit(self):
+        literature = "研究内容\n\n这是足够长的研究内容用于通过检查。".encode("utf-8")
+        status, payload = self.post_multipart(
+            "/api/review", {"topic": "测试"}, [("files", "a.txt", literature)]
+        )
+        self.assertEqual(status, 200)
+        job_id = payload["id"]
+
+        edited_md = "# 编辑后的综述\n\n这是用户编辑的内容。"
+        status, result = self.post_multipart(
+            "/api/review/edit", {"job_id": str(job_id), "markdown": edited_md}, []
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["markdown"], edited_md)
+        self.assertEqual(result["engine"], "user-edited")
+
 
 if __name__ == "__main__":
     unittest.main()

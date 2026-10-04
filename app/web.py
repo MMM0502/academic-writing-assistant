@@ -10,8 +10,9 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 from .config import settings
-from .exporters import download_name, format_result_to_docx, markdown_to_docx, preserve_original_docx
+from .exporters import download_name, format_result_to_docx, markdown_to_docx, preserve_original_docx, references_to_format, EXPORT_FORMATS
 from .formatters import REFERENCE_TYPE_LABELS, STYLE_LABELS, check_citations, format_document, format_references
+from .llm import get_status as get_llm_status
 from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
@@ -77,7 +78,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_payload(HTTPStatus.OK, {
                 "styles": [{"code": code, "label": label} for code, label in STYLE_LABELS.items()],
                 "reference_types": REFERENCE_TYPE_LABELS,
+                "export_formats": list(EXPORT_FORMATS.keys()),
             })
+        elif parsed.path == "/api/llm-status":
+            self.send_payload(HTTPStatus.OK, get_llm_status())
         else:
             self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
 
@@ -117,6 +121,15 @@ class Handler(BaseHTTPRequestHandler):
                 body = markdown_to_docx(content, payload.get("title", job["title"]), payload.get("style", ""))
             filename = download_name(job["title"], "docx")
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif output_format in EXPORT_FORMATS:
+            references = payload.get("references", [])
+            if not references:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": "该记录没有参考文献数据，无法导出为指定格式。"})
+                return
+            body = references_to_format(references, output_format).encode("utf-8")
+            ext = EXPORT_FORMATS[output_format]["extension"]
+            filename = download_name(job["title"], ext)
+            content_type = EXPORT_FORMATS[output_format]["content_type"]
         else:
             output_format = "md"
             body = content.encode("utf-8")
@@ -135,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/format", "/api/review", "/api/check-citations"}:
+        if parsed.path not in {"/api/format", "/api/review", "/api/check-citations", "/api/review/edit"}:
             self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
             return
         try:
@@ -144,6 +157,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.handle_format(fields)
             elif parsed.path == "/api/check-citations":
                 self.handle_check_citations(fields)
+            elif parsed.path == "/api/review/edit":
+                self.handle_review_edit(fields)
             else:
                 self.handle_review(fields)
         except ValueError as exc:
@@ -281,6 +296,32 @@ class Handler(BaseHTTPRequestHandler):
             for ref in document["references"]
         ]
         self.send_payload(HTTPStatus.OK, result)
+
+    def handle_review_edit(self, fields: dict) -> None:
+        job_id_str = fields.get("job_id", "")
+        if not job_id_str:
+            raise ValueError("缺少记录编号。")
+        try:
+            job_id = int(job_id_str)
+        except ValueError:
+            raise ValueError("记录编号无效。")
+        job = store.get(job_id)
+        if not job:
+            raise ValueError("记录不存在。")
+        payload = job["payload"]
+        edited_markdown = fields.get("markdown", "")
+        if not edited_markdown.strip():
+            raise ValueError("编辑内容不能为空。")
+        versions = payload.get("versions", [])
+        versions.append({"markdown": payload.get("markdown", ""), "saved_at": payload.get("engine", "unknown")})
+        payload["markdown"] = edited_markdown
+        payload["versions"] = versions
+        payload["engine"] = "user-edited"
+        store.delete(job_id)
+        new_id = store.add("review", job["title"], payload)
+        payload["id"] = new_id
+        payload["version_count"] = len(versions) + 1
+        self.send_payload(HTTPStatus.OK, payload)
 
 
 def run_server() -> None:

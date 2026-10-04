@@ -349,3 +349,161 @@ def download_name(title: str, extension: str) -> str:
     safe = Path(title or "academic-result").stem
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", safe).strip(" .") or "academic-result"
     return f"{safe}.{extension}"
+
+
+def _escape_bibtex(value: str) -> str:
+    return value.replace("&", "\\&").replace("%", "\\%").replace("_", "\\_").replace("#", "\\#")
+
+
+def references_to_bibtex(references: list[dict]) -> str:
+    entries = []
+    for ref in references:
+        authors = ref.get("authors", "")
+        title = ref.get("title", "")
+        year = ref.get("year", "").replace("n.d.", "")
+        source = ref.get("source", "")
+        volume = ref.get("volume", "")
+        issue = ref.get("issue", "")
+        pages = ref.get("pages", "")
+        doi = ref.get("doi", "")
+        ref_type = ref.get("reference_type", "journal")
+        key = re.sub(r"[^a-zA-Z]", "", authors.split(",")[0])[:8] + (year or "nd")
+        entry_type = {"journal": "article", "conference": "inproceedings", "thesis": "phdthesis",
+                      "book": "book", "web": "misc", "patent": "misc", "report": "techreport"}.get(ref_type, "article")
+        lines = [f"@{entry_type}{{{key},"]
+        if authors:
+            lines.append(f"  author = {{{_escape_bibtex(authors)}}},")
+        if title:
+            lines.append(f"  title = {{{_escape_bibtex(title)}}},")
+        if source:
+            field = "journal" if entry_type == "article" else "booktitle" if entry_type == "inproceedings" else "publisher"
+            lines.append(f"  {field} = {{{_escape_bibtex(source)}}},")
+        if year:
+            lines.append(f"  year = {{{year}}},")
+        if volume:
+            lines.append(f"  volume = {{{volume}}},")
+        if issue:
+            lines.append(f"  number = {{{issue}}},")
+        if pages:
+            lines.append(f"  pages = {{{pages}}},")
+        if doi:
+            lines.append(f"  doi = {{{doi}}},")
+        lines.append("}")
+        entries.append("\n".join(lines))
+    return "\n\n".join(entries)
+
+
+def references_to_ris(references: list[dict]) -> str:
+    entries = []
+    type_map = {"journal": "JOUR", "conference": "CONF", "thesis": "THES",
+                "book": "BOOK", "web": "ELEC", "patent": "PATENT", "report": "RPRT"}
+    for ref in references:
+        lines = [f"TY  - {type_map.get(ref.get('reference_type', 'journal'), 'JOUR')}"]
+        authors = ref.get("authors", "")
+        if authors:
+            for author in authors.split(";"):
+                author = author.strip()
+                if author:
+                    lines.append(f"AU  - {author}")
+        if ref.get("title"):
+            lines.append(f"TI  - {ref['title']}")
+        if ref.get("source"):
+            lines.append(f"JO  - {ref['source']}")
+        year = ref.get("year", "").replace("n.d.", "")
+        if year:
+            lines.append(f"PY  - {year}")
+        if ref.get("volume"):
+            lines.append(f"VL  - {ref['volume']}")
+        if ref.get("issue"):
+            lines.append(f"IS  - {ref['issue']}")
+        if ref.get("pages"):
+            lines.append(f"SP  - {ref['pages']}")
+        if ref.get("doi"):
+            lines.append(f"DO  - {ref['doi']}")
+        if ref.get("url"):
+            lines.append(f"UR  - {ref['url']}")
+        lines.append("ER  -")
+        entries.append("\n".join(lines))
+    return "\n\n".join(entries)
+
+
+def references_to_endnote(references: list[dict]) -> str:
+    type_map = {"journal": "0", "conference": "1", "thesis": "3",
+                "book": "4", "web": "5", "patent": "6", "report": "7"}
+    records = []
+    for ref in references:
+        lines = [f"TY  - {type_map.get(ref.get('reference_type', 'journal'), '0')}"]
+        authors = ref.get("authors", "")
+        if authors:
+            lines.append(f"AU  - {authors}")
+        if ref.get("title"):
+            lines.append(f"TI  - {ref['title']}")
+        if ref.get("source"):
+            lines.append(f"SO  - {ref['source']}")
+        year = ref.get("year", "").replace("n.d.", "")
+        if year:
+            lines.append(f"PY  - {year}")
+        if ref.get("volume"):
+            lines.append(f"VL  - {ref['volume']}")
+        if ref.get("issue"):
+            lines.append(f"IS  - {ref['issue']}")
+        if ref.get("pages"):
+            lines.append(f"SP  - {ref['pages']}")
+        if ref.get("doi"):
+            lines.append(f"DO  - {ref['doi']}")
+        lines.append("ER  -")
+        records.append("\n".join(lines))
+    return "\n\n".join(records)
+
+
+def references_to_plaintext(references: list[dict]) -> str:
+    lines = []
+    for ref in references:
+        index = ref.get("index", "")
+        authors = ref.get("authors", "")
+        title = ref.get("title", "")
+        source = ref.get("source", "")
+        year = ref.get("year", "")
+        volume = ref.get("volume", "")
+        issue = ref.get("issue", "")
+        pages = ref.get("pages", "")
+        doi = ref.get("doi", "")
+        parts = [f"[{index}]"]
+        if authors:
+            parts.append(authors)
+        if title:
+            parts.append(title)
+        if source:
+            parts.append(source)
+        if volume:
+            parts.append(f"Vol.{volume}")
+        if issue:
+            parts.append(f"No.{issue}")
+        if pages:
+            parts.append(f"pp.{pages}")
+        if year:
+            parts.append(year)
+        if doi:
+            parts.append(f"DOI:{doi}")
+        lines.append(". ".join(parts) + ".")
+    return "\n".join(lines)
+
+
+EXPORT_FORMATS = {
+    "bibtex": {"extension": "bib", "content_type": "application/x-bibtex"},
+    "ris": {"extension": "ris", "content_type": "application/x-research-info-systems"},
+    "endnote": {"extension": "enw", "content_type": "application/x-endnote-refer"},
+    "txt": {"extension": "txt", "content_type": "text/plain; charset=utf-8"},
+}
+
+
+def references_to_format(references: list[dict], fmt: str) -> str:
+    if fmt == "bibtex":
+        return references_to_bibtex(references)
+    if fmt == "ris":
+        return references_to_ris(references)
+    if fmt == "endnote":
+        return references_to_endnote(references)
+    if fmt == "txt":
+        return references_to_plaintext(references)
+    raise ValueError(f"不支持的导出格式：{fmt}")

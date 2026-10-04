@@ -105,3 +105,42 @@ select:focus, input[type=text]:focus { border-color: var(--teal); }
   .result-tools { margin-top: 15px; }
   .principles { grid-template-columns: 1fr; gap: 22px; }
 }
+
+.literature-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: var(--soft-teal);
+}
+.card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.card-index { background: var(--teal); color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 13px; }
+.card-year { color: var(--muted); font-size: 13px; margin-left: auto; }
+.card-keywords { margin-bottom: 10px; }
+.card-fields { display: grid; gap: 6px; }
+.card-field { display: flex; gap: 8px; font-size: 13px; }
+.field-label { color: var(--teal-dark); font-weight: 600; min-width: 70px; }
+.field-value { color: var(--ink); }
+
+.comparisons-section { margin: 14px 0; }
+.comparison-item { padding: 8px 12px; border-left: 3px solid var(--orange); margin-bottom: 6px; font-size: 13px; display: flex; gap: 12px; align-items: center; }
+.cmp-source { font-weight: 600; }
+.cmp-relation { color: var(--teal); }
+.cmp-keywords { color: var(--muted); }
+
+.llm-status { background: var(--soft-teal); border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 13px; }
+.meta-label { font-weight: 600; color: var(--teal-dark); margin-bottom: 6px; }
+
+.structure-info { margin: 10px 0; }
+.chip-ok { background: var(--soft-teal); color: var(--teal-dark); }
+.chip-warn { background: #fff3e0; color: #e65100; }
+
+.edit-textarea { width: 100%; min-height: 300px; font-family: Georgia, serif; font-size: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; margin: 10px 0; }
+
+.cards-section { margin: 14px 0; }
+
+.export-dropdown { position: relative; display: inline-block; }
+.dropdown-menu { display: none; position: absolute; right: 0; top: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 100; min-width: 160px; }
+.dropdown-menu.show { display: block; }
+.dropdown-menu a { display: block; padding: 8px 14px; color: var(--ink); text-decoration: none; font-size: 13px; }
+.dropdown-menu a:hover { background: var(--soft-teal); color: var(--teal-dark); }

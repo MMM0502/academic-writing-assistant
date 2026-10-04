@@ -4,7 +4,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.exporters import ExportStyle, format_result_to_docx, preserve_original_docx
+from app.exporters import ExportStyle, format_result_to_docx, preserve_original_docx, references_to_bibtex, references_to_ris, references_to_endnote, references_to_plaintext
 from app.formatters import format_document, parse_reference, split_authors
 from app.parsers import detect_sections, extract_structure, extract_text, title_from_text
 from app.review import build_item, generate_local_review
@@ -260,6 +260,91 @@ class StoreTests(unittest.TestCase):
             job_id = store.add("format", "测试记录", {"formatted_text": "hello"})
             self.assertEqual(store.get(job_id)["payload"]["formatted_text"], "hello")
             self.assertEqual(len(store.list()), 1)
+
+
+class LiteratureCardTests(unittest.TestCase):
+    def test_build_item_extracts_research_question(self):
+        text = "深度学习方法研究\n\n本文研究大模型在学术写作中的应用问题。我们采用基于Transformer的方法进行分析。"
+        item = build_item(text, "demo.txt")
+        self.assertTrue(item.research_question or item.method or item.conclusion)
+
+    def test_build_item_extracts_method(self):
+        text = "代码生成研究\n\n本文采用基于大模型的方法设计了一个新框架。实验结果表明，该方法可以提升效率。"
+        item = build_item(text, "demo.txt")
+        self.assertTrue(item.method or item.conclusion)
+
+    def test_local_review_generates_cards(self):
+        items = [
+            build_item("智能方法研究\n\n本文研究智能方法。采用深度学习方法。结果表明效果良好。", "a.txt"),
+            build_item("数据治理研究\n\n本文研究数据治理。采用统计方法。然而样本量不足是局限。", "b.txt"),
+        ]
+        result = generate_local_review(items, "智能研究")
+        self.assertIn("cards", result)
+        self.assertEqual(len(result["cards"]), 2)
+        self.assertEqual(result["cards"][0]["index"], 1)
+        self.assertIn("title", result["cards"][0])
+
+    def test_local_review_generates_comparisons(self):
+        items = [
+            build_item("方法A研究\n\n结果表明方法A效果好。关键词：深度学习、生成模型。", "a.txt"),
+            build_item("方法B研究\n\n结果表明方法B效果好。关键词：深度学习、评测。", "b.txt"),
+        ]
+        result = generate_local_review(items, "方法研究")
+        self.assertIn("comparisons", result)
+
+    def test_local_review_has_source_annotations(self):
+        items = [build_item("研究一\n\n这是研究内容。", "a.txt")]
+        result = generate_local_review(items, "测试")
+        self.assertIn("[来源：文献 1]", result["markdown"])
+
+    def test_local_review_has_llm_status(self):
+        items = [build_item("研究一\n\n这是研究内容。", "a.txt")]
+        result = generate_local_review(items, "测试")
+        self.assertIn("llm_status", result)
+
+
+class MultiFormatExportTests(unittest.TestCase):
+    def _sample_refs(self) -> list[dict]:
+        return [
+            {"index": 1, "authors": "Smith J", "year": "2024", "title": "Deep Learning", "source": "Nature",
+             "volume": "35", "issue": "2", "pages": "12-20", "doi": "10.1038/xxx", "url": "",
+             "reference_type": "journal"},
+            {"index": 2, "authors": "Lee K", "year": "2023", "title": "Methods", "source": "Science",
+             "volume": "", "issue": "", "pages": "", "doi": "", "url": "", "reference_type": "journal"},
+        ]
+
+    def test_bibtex_output(self):
+        bibtex = references_to_bibtex(self._sample_refs())
+        self.assertIn("@article{", bibtex)
+        self.assertIn("author = {Smith J}", bibtex)
+        self.assertIn("title = {Deep Learning}", bibtex)
+        self.assertIn("year = {2024}", bibtex)
+        self.assertIn("doi = {10.1038/xxx}", bibtex)
+
+    def test_ris_output(self):
+        ris = references_to_ris(self._sample_refs())
+        self.assertIn("TY  - JOUR", ris)
+        self.assertIn("AU  - Smith J", ris)
+        self.assertIn("TI  - Deep Learning", ris)
+        self.assertIn("ER  -", ris)
+
+    def test_endnote_output(self):
+        endnote = references_to_endnote(self._sample_refs())
+        self.assertIn("TY  - 0", endnote)
+        self.assertIn("AU  - Smith J", endnote)
+        self.assertIn("ER  -", endnote)
+
+    def test_plaintext_output(self):
+        plaintext = references_to_plaintext(self._sample_refs())
+        self.assertIn("[1]", plaintext)
+        self.assertIn("Smith J", plaintext)
+        self.assertIn("Deep Learning", plaintext)
+
+    def test_bibtex_conference_type(self):
+        refs = [{"index": 1, "authors": "A", "year": "2024", "title": "T", "source": "Conf",
+                 "volume": "", "issue": "", "pages": "", "doi": "", "url": "", "reference_type": "conference"}]
+        bibtex = references_to_bibtex(refs)
+        self.assertIn("@inproceedings{", bibtex)
 
 
 if __name__ == "__main__":
