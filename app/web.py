@@ -437,6 +437,21 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("文件中可识别的正文过少，请检查文件内容。")
         style = fields.get("style", "gb7714")
         result = format_document(text, style)
+        journal_style_id = fields.get("journal_style_id", "")
+        if journal_style_id:
+            try:
+                js = journals.get_style(store, int(journal_style_id))
+            except ValueError:
+                js = None
+            if js:
+                rules = js["rules"]
+                for ref in result["references"]:
+                    ref["formatted"] = journals.format_reference_by_rules(ref, rules, ref["index"])
+                ref_text = "\n".join(ref["formatted"] for ref in result["references"])
+                body_part = result.get("body_text", "")
+                result["formatted_text"] = (body_part + "\n\n参考文献\n\n" + ref_text).strip() if body_part else ref_text
+                result["style"] = js["name"]
+                result["journal_style_id"] = js["id"]
         result["source_name"] = uploaded["filename"]
         result["kind"] = "format"
         result["structure"] = extract_structure(text)

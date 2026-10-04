@@ -160,3 +160,6 @@ select:focus, input[type=text]:focus { border-color: var(--teal); }
 .journal-style-form .field { display: block; margin-bottom: 10px; }
 .journal-style-form .field span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .journal-style-form input, .journal-style-form select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+
+.journal-builtin { margin-bottom: 16px; }
+.journal-custom .history-item { margin-bottom: 8px; }

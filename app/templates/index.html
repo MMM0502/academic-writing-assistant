@@ -91,6 +91,11 @@
                 <option value="ieee">IEEE</option>
               </select>
             </label>
+            <label class="field"><span>期刊格式 <small>可选，覆盖引用规范</small></span>
+              <select name="journal_style_id" id="format-journal-style">
+                <option value="">不使用</option>
+              </select>
+            </label>
             <button class="primary-button" type="submit">开始规整 <span>→</span></button>
           </div>
         </form>
@@ -136,12 +141,15 @@
           <div><p class="kicker">CUSTOM STYLE</p><h2>创建自定义格式</h2></div>
         </div>
         <form id="journal-style-form" class="journal-style-form">
-          <label class="field"><span>格式名称</span>
-            <input type="text" name="name" required placeholder="例如：My Journal Style">
-          </label>
-          <label class="field"><span>出版机构</span>
-            <input type="text" name="publisher" placeholder="可选">
-          </label>
+          <div class="form-row">
+            <label class="field"><span>格式名称</span>
+              <input type="text" name="name" required placeholder="例如：My Journal Style">
+            </label>
+            <label class="field"><span>出版机构</span>
+              <input type="text" name="publisher" placeholder="可选">
+            </label>
+          </div>
+          <p class="meta-label">参考文献规则</p>
           <div class="form-row">
             <label class="field"><span>作者格式</span>
               <select name="author_format">
@@ -153,8 +161,6 @@
             <label class="field"><span>et al 阈值</span>
               <input type="number" name="max_authors_et_al" value="5" min="1" max="20">
             </label>
-          </div>
-          <div class="form-row">
             <label class="field"><span>年份格式</span>
               <select name="year_format">
                 <option value="no_parentheses">无括号</option>
@@ -165,6 +171,73 @@
               <select name="title_case">
                 <option value="sentence">句首大写</option>
                 <option value="title">标题大写</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>引用标注方式</span>
+              <select name="citation_style">
+                <option value="superscript">上标数字</option>
+                <option value="bracket">括号数字 [1]</option>
+                <option value="author_year">作者-年份</option>
+              </select>
+            </label>
+            <label class="field"><span>参考文献排序</span>
+              <select name="sort_order">
+                <option value="citation_order">按引用顺序</option>
+                <option value="alphabetical">按字母顺序</option>
+              </select>
+            </label>
+          </div>
+          <p class="meta-label">正文排版</p>
+          <div class="form-row">
+            <label class="field"><span>行距</span>
+              <select name="line_spacing">
+                <option value="1.0">单倍</option>
+                <option value="1.5">1.5 倍</option>
+                <option value="2.0">双倍</option>
+              </select>
+            </label>
+            <label class="field"><span>正文字号</span>
+              <select name="font_size">
+                <option value="12pt">小四 (12pt)</option>
+                <option value="10.5pt">五号 (10.5pt)</option>
+                <option value="11pt">11pt</option>
+              </select>
+            </label>
+            <label class="field"><span>字体</span>
+              <select name="font_family">
+                <option value="SimSun">宋体</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="SimHei">黑体</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>页边距-上 (cm)</span>
+              <input type="number" name="margin_top" value="2.54" step="0.1" min="0">
+            </label>
+            <label class="field"><span>页边距-下 (cm)</span>
+              <input type="number" name="margin_bottom" value="2.54" step="0.1" min="0">
+            </label>
+            <label class="field"><span>页边距-左 (cm)</span>
+              <input type="number" name="margin_left" value="3.18" step="0.1" min="0">
+            </label>
+            <label class="field"><span>页边距-右 (cm)</span>
+              <input type="number" name="margin_right" value="3.18" step="0.1" min="0">
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>图表标题位置</span>
+              <select name="figure_caption">
+                <option value="below">图下表上</option>
+                <option value="above">图上表上</option>
+              </select>
+            </label>
+            <label class="field"><span>段落首行缩进</span>
+              <select name="first_line_indent">
+                <option value="2chars">缩进 2 字符</option>
+                <option value="none">不缩进</option>
               </select>
             </label>
           </div>

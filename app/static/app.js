@@ -375,15 +375,24 @@ async function loadJournalStyles() {
       target.innerHTML = '<div class="empty-state">暂无期刊格式。</div>';
       return;
     }
-    target.innerHTML = data.styles.map((style) => `
-      <div class="history-item">
-        <div>
-          <span class="history-type">${style.is_builtin ? "内置" : "自定义"}</span>
-          <h3>${escapeHtml(style.name)}</h3>
-          <p>${escapeHtml(style.publisher || "未知出版机构")}</p>
-        </div>
-        <div>${style.is_builtin ? "" : `<button class="small-button" onclick="deleteJournalStyle(${style.id})">删除</button>`}</div>
-      </div>`).join("");
+    const builtin = data.styles.filter((s) => s.is_builtin);
+    const custom = data.styles.filter((s) => !s.is_builtin);
+    let html = "";
+    if (builtin.length) {
+      html += `<div class="journal-builtin"><p class="meta-label">内置格式（${builtin.length}）</p><div class="chips">` +
+        builtin.map((s) => `<span class="chip chip-ok" title="${escapeHtml(s.publisher || "")}">${escapeHtml(s.name)}</span>`).join("") +
+        `</div></div>`;
+    }
+    if (custom.length) {
+      html += `<div class="journal-custom"><p class="meta-label">自定义格式</p>` +
+        custom.map((s) => `
+          <div class="history-item">
+            <div><span class="history-type">自定义</span><h3>${escapeHtml(s.name)}</h3><p>${escapeHtml(s.publisher || "未指定")}</p></div>
+            <div><button class="small-button" onclick="deleteJournalStyle(${s.id})">删除</button></div>
+          </div>`).join("") +
+        `</div>`;
+    }
+    target.innerHTML = html;
   } catch {
     target.innerHTML = '<div class="warning">期刊格式加载失败。</div>';
   }
@@ -417,6 +426,17 @@ $("#journal-style-form").addEventListener("submit", async (event) => {
     pages_prefix: "pp.",
     number_prefix: "",
     doi_prefix: "doi:",
+    citation_style: form.citation_style.value,
+    sort_order: form.sort_order.value,
+    line_spacing: form.line_spacing.value,
+    font_size: form.font_size.value,
+    font_family: form.font_family.value,
+    margin_top: form.margin_top.value,
+    margin_bottom: form.margin_bottom.value,
+    margin_left: form.margin_left.value,
+    margin_right: form.margin_right.value,
+    figure_caption: form.figure_caption.value,
+    first_line_indent: form.first_line_indent.value,
   };
   try {
     const response = await fetch("/api/journal-styles", {
@@ -429,10 +449,24 @@ $("#journal-style-form").addEventListener("submit", async (event) => {
     showToast("自定义格式已保存");
     form.reset();
     loadJournalStyles();
+    loadFormatJournalStyles();
   } catch (error) {
     showToast(error.message);
   }
 });
+
+async function loadFormatJournalStyles() {
+  const select = $("#format-journal-style");
+  if (!select) return;
+  try {
+    const response = await fetch("/api/journal-styles");
+    const data = await response.json();
+    const current = select.value;
+    select.innerHTML = '<option value="">不使用</option>' +
+      data.styles.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}${s.is_builtin ? "" : "（自定义）"}</option>`).join("");
+    select.value = current;
+  } catch {}
+}
 
 async function loadStats() {
   const target = $("#stats-content");
@@ -464,3 +498,4 @@ async function loadStats() {
 }
 
 checkAuth();
+loadFormatJournalStyles();
