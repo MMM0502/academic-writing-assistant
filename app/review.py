@@ -163,9 +163,10 @@ def generate_local_review(items: list[LiteratureItem], topic: str = "") -> dict:
     all_keywords = Counter(keyword for item in items for keyword in item.keywords)
     years = sorted({item.year for item in items if item.year != "未标注"})
     topic = topic.strip() or (all_keywords.most_common(1)[0][0] if all_keywords else "相关研究")
+    year_range = f"{years[0]}\u2014{years[-1]}" if years else "未完整标注"
     overview = (
         f"围绕\u201c{topic}\u201d这一议题，现有研究主要从 {len(groups)} 个方向展开。"
-        f"本次共整理 {len(items)} 篇文献，时间范围为 {years[0] + '\u2014' + years[-1] if years else '未完整标注'}。"
+        f"本次共整理 {len(items)} 篇文献，时间范围为 {year_range}。"
         "从文献摘要与正文中的高频概念来看，研究重点集中在问题建模、方法设计和应用验证三个层面。"
     )
     sections = []
