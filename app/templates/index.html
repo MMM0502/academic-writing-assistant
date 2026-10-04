@@ -240,6 +240,52 @@
                 <option value="none">不缩进</option>
               </select>
             </label>
+            <label class="field"><span>对齐方式</span>
+              <select name="body_alignment">
+                <option value="both">两端对齐</option>
+                <option value="left">左对齐</option>
+              </select>
+            </label>
+          </div>
+          <p class="meta-label">标题层级字体</p>
+          <div class="form-row">
+            <label class="field"><span>一级标题字体</span>
+              <select name="heading1_font">
+                <option value="SimHei">黑体</option>
+                <option value="SimSun">宋体</option>
+              </select>
+            </label>
+            <label class="field"><span>二级标题字体</span>
+              <select name="heading2_font">
+                <option value="SimHei">黑体</option>
+                <option value="SimSun">宋体</option>
+              </select>
+            </label>
+            <label class="field"><span>三级标题字体</span>
+              <select name="heading3_font">
+                <option value="SimHei">黑体</option>
+                <option value="SimSun">宋体</option>
+              </select>
+            </label>
+          </div>
+          <p class="meta-label">页眉页脚</p>
+          <div class="form-row">
+            <label class="field"><span>页眉内容</span>
+              <input type="text" name="page_header" placeholder="可选，如论文标题">
+            </label>
+            <label class="field"><span>页码位置</span>
+              <select name="page_number_pos">
+                <option value="center">居中</option>
+                <option value="right">右下</option>
+                <option value="left">左下</option>
+              </select>
+            </label>
+            <label class="field"><span>参考文献字体</span>
+              <select name="ref_font">
+                <option value="SimSun">宋体</option>
+                <option value="Times New Roman">Times New Roman</option>
+              </select>
+            </label>
           </div>
           <button class="primary-button" type="submit">保存自定义格式 <span>→</span></button>
         </form>

@@ -36,9 +36,91 @@ class ExportStyle:
     page_margin: int = 1440
     page_width: int = 11906
     page_height: int = 16838
+    margin_top: int = 1440
+    margin_bottom: int = 1440
+    margin_left: int = 1440
+    margin_right: int = 1440
+    heading1_font_ascii: str = "Calibri"
+    heading1_font_east: str = "黑体"
+    heading1_size: int = 32
+    heading1_bold: bool = True
+    heading1_alignment: str = "center"
+    heading2_font_ascii: str = "Calibri"
+    heading2_font_east: str = "黑体"
+    heading2_size: int = 28
+    heading2_bold: bool = True
+    heading3_font_ascii: str = "Calibri"
+    heading3_font_east: str = "黑体"
+    heading3_size: int = 24
+    heading3_bold: bool = True
+    ref_font_ascii: str = "Calibri"
+    ref_font_east: str = "宋体"
+    ref_size: int = 21
+    body_alignment: str = "both"
+    paragraph_space_before: int = 0
+    paragraph_space_after: int = 0
+    page_header: str = ""
+    page_number_pos: str = "center"
+    abstract_max_chars: int = 300
 
 
 DEFAULT_STYLE = ExportStyle()
+
+
+def rules_to_export_style(rules: dict) -> ExportStyle:
+    if not rules:
+        return DEFAULT_STYLE
+    cm_to_twip = 567
+    pt_to_half_pt = 2
+    font_map = {"SimSun": ("Calibri", "宋体"), "SimHei": ("Calibri", "黑体"), "Times New Roman": ("Times New Roman", "宋体")}
+    def _fonts(key, default_east="宋体"):
+        v = rules.get(key, "SimSun")
+        return font_map.get(v, ("Calibri", v))
+    def _cm(key, default_cm=2.54):
+        try:
+            return int(float(rules.get(key, default_cm)) * cm_to_twip)
+        except (ValueError, TypeError):
+            return int(default_cm * cm_to_twip)
+    def _pt(key, default_pt=12):
+        try:
+            raw = str(rules.get(key, f"{default_pt}pt")).replace("pt", "").strip()
+            return int(float(raw) * pt_to_half_pt)
+        except (ValueError, TypeError):
+            return int(default_pt * pt_to_half_pt)
+    def _spacing(key, default_s="1.5"):
+        try:
+            s = str(rules.get(key, default_s))
+            return int(float(s) * 240)
+        except (ValueError, TypeError):
+            return 360
+    def _indent(key):
+        v = rules.get(key, "2chars")
+        return 480 if v == "2chars" else 0
+    body_ascii, body_east = _fonts("font_family")
+    body_size = _pt("font_size", 12)
+    line_sp = _spacing("line_spacing", "1.5")
+    indent = _indent("first_line_indent")
+    m_top = _cm("margin_top", 2.54)
+    m_bottom = _cm("margin_bottom", 2.54)
+    m_left = _cm("margin_left", 3.18)
+    m_right = _cm("margin_right", 3.18)
+    align_map = {"both": "both", "left": "left", "center": "center", "right": "right"}
+    alignment = align_map.get(rules.get("body_alignment", "both"), "both")
+    h1_ascii, h1_east = _fonts("heading1_font", "黑体")
+    h2_ascii, h2_east = _fonts("heading2_font", "黑体")
+    h3_ascii, h3_east = _fonts("heading3_font", "黑体")
+    ref_ascii, ref_east = _fonts("ref_font", "宋体")
+    return ExportStyle(
+        body_font_ascii=body_ascii, body_font_east=body_east, body_size=body_size,
+        line_spacing=line_sp, first_line_indent=indent,
+        margin_top=m_top, margin_bottom=m_bottom, margin_left=m_left, margin_right=m_right,
+        page_margin=m_top, body_alignment=alignment,
+        heading1_font_ascii=h1_ascii, heading1_font_east=h1_east,
+        heading2_font_ascii=h2_ascii, heading2_font_east=h2_east,
+        heading3_font_ascii=h3_ascii, heading3_font_east=h3_east,
+        ref_font_ascii=ref_ascii, ref_font_east=ref_east,
+        page_header=rules.get("page_header", ""),
+    )
 
 
 def _run_xml(text: str, kind: str = "body", style: ExportStyle = None) -> str:
@@ -65,7 +147,7 @@ def _paragraph_xml(text: str, kind: str = "body", style: ExportStyle = None) -> 
     elif kind == "reference":
         props = f'<w:pPr><w:ind w:left="{style.reference_hanging_indent}" w:hanging="{style.reference_hanging_indent}"/><w:spacing w:after="{style.reference_spacing_after}" w:line="{style.reference_line_spacing}" w:lineRule="auto"/></w:pPr>'
     else:
-        props = f'<w:pPr><w:ind w:firstLine="{style.first_line_indent}"/><w:spacing w:after="{style.body_spacing_after}" w:line="{style.line_spacing}" w:lineRule="auto"/></w:pPr>'
+        props = f'<w:pPr><w:ind w:firstLine="{style.first_line_indent}"/><w:jc w:val="{style.body_alignment}"/><w:spacing w:after="{style.body_spacing_after}" w:line="{style.line_spacing}" w:lineRule="auto"/></w:pPr>'
     return f'<w:p>{props}{_run_xml(text, kind, style)}</w:p>'
 
 
@@ -164,30 +246,53 @@ def format_result_to_docx(result: dict, export_style: ExportStyle = None) -> byt
 
 def _build_docx(document_parts: list[str], export_style: ExportStyle = None) -> bytes:
     export_style = export_style or DEFAULT_STYLE
+    s = export_style
+    header_xml = ""
+    if s.page_header:
+        header_xml = (
+            f'<w:headerReference w:type="default" r:id="rIdHeader"/>'
+        )
+    footer_pgnum = (
+        '<w:ftr xmlns:w="{ns}"><w:p><w:pPr><w:jc w:val="{pos}"/></w:pPr>'
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        '<w:r><w:instrText xml:space="preserve">PAGE</w:instrText></w:r>'
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>'
+    ).format(ns=_W_NS, pos=s.page_number_pos if s.page_number_pos else "center")
+    sect_pr = (
+        f'<w:sectPr>'
+        f'<w:pgSz w:w="{s.page_width}" w:h="{s.page_height}"/>'
+        f'<w:pgMar w:top="{s.margin_top}" w:right="{s.margin_right}" w:bottom="{s.margin_bottom}" w:left="{s.margin_left}"/>'
+        f'<w:footerReference w:type="default" r:id="rIdFooter"/>'
+        f'</w:sectPr>'
+    )
     document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<w:document xmlns:w="{_W_NS}">'
-        '<w:body>' + ''.join(document_parts) +
-        f'<w:sectPr><w:pgSz w:w="{export_style.page_width}" w:h="{export_style.page_height}"/>'
-        f'<w:pgMar w:top="{export_style.page_margin}" w:right="{export_style.page_margin}" w:bottom="{export_style.page_margin}" w:left="{export_style.page_margin}"/>'
-        '</w:sectPr></w:body></w:document>')
+        f'<w:document xmlns:w="{_W_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<w:body>' + ''.join(document_parts) + sect_pr + '</w:body></w:document>')
     content_types = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
         '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+        '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>'
         '</Types>')
     relationships = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
         '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="word/styles.xml"/>'
         '</Relationships>')
+    doc_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>'
+        '</Relationships>')
     output = BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", content_types)
         archive.writestr("_rels/.rels", relationships)
+        archive.writestr("word/_rels/document.xml.rels", doc_rels)
         archive.writestr("word/document.xml", document)
         archive.writestr("word/styles.xml", _styles_xml(export_style))
+        archive.writestr("word/footer1.xml", footer_pgnum)
     return output.getvalue()
 
 

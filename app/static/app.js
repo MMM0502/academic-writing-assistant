@@ -437,6 +437,13 @@ $("#journal-style-form").addEventListener("submit", async (event) => {
     margin_right: form.margin_right.value,
     figure_caption: form.figure_caption.value,
     first_line_indent: form.first_line_indent.value,
+    body_alignment: form.body_alignment.value,
+    heading1_font: form.heading1_font.value,
+    heading2_font: form.heading2_font.value,
+    heading3_font: form.heading3_font.value,
+    ref_font: form.ref_font.value,
+    page_header: form.page_header.value,
+    page_number_pos: form.page_number_pos.value,
   };
   try {
     const response = await fetch("/api/journal-styles", {

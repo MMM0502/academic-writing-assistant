@@ -3,6 +3,36 @@ from __future__ import annotations
 from .storage import Store
 
 
+FULL_LAYOUT_RULES = {
+    "page_size": "A4",
+    "margin_top": "2.54",
+    "margin_bottom": "2.54",
+    "margin_left": "3.18",
+    "margin_right": "3.18",
+    "font_family": "SimSun",
+    "font_size": "12pt",
+    "line_spacing": "1.5",
+    "first_line_indent": "2chars",
+    "body_alignment": "both",
+    "heading1_font": "SimHei",
+    "heading2_font": "SimHei",
+    "heading3_font": "SimHei",
+    "ref_font": "SimSun",
+    "page_header": "",
+    "page_number_pos": "center",
+    "figure_caption": "below",
+    "citation_style": "superscript",
+    "sort_order": "citation_order",
+    "abstract_max_chars": 300,
+}
+
+
+def _merge_rules(ref_rules: dict) -> dict:
+    rules = dict(FULL_LAYOUT_RULES)
+    rules.update(ref_rules)
+    return rules
+
+
 BUILTIN_JOURNALS = [
     {
         "name": "Nature",
@@ -175,7 +205,7 @@ def init_builtin_styles(store: Store) -> None:
         store.add_journal_style(
             name=journal["name"],
             publisher=journal["publisher"],
-            rules=journal["rules"],
+            rules=_merge_rules(journal["rules"]),
             is_builtin=True,
         )
 

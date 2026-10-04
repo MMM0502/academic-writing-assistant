@@ -10,7 +10,7 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 from .config import settings
-from .exporters import download_name, format_result_to_docx, markdown_to_docx, preserve_original_docx, references_to_format, EXPORT_FORMATS
+from .exporters import download_name, format_result_to_docx, markdown_to_docx, preserve_original_docx, references_to_format, EXPORT_FORMATS, rules_to_export_style
 from .formatters import REFERENCE_TYPE_LABELS, STYLE_LABELS, check_citations, format_document, format_references
 from .llm import get_status as get_llm_status
 from .parsers import extract_text, extract_structure
@@ -164,14 +164,15 @@ class Handler(BaseHTTPRequestHandler):
         output_format = query.get("format", ["md"])[0].lower()
         mode = query.get("mode", ["rebuild"])[0].lower()
         if output_format == "docx":
+            export_style = rules_to_export_style(payload.get("journal_rules")) if payload.get("journal_rules") else None
             if mode == "preserve" and payload.get("source_data"):
                 import base64
                 original_data = base64.b64decode(payload["source_data"])
-                body = preserve_original_docx(original_data, payload)
+                body = preserve_original_docx(original_data, payload, export_style)
             elif payload.get("kind") == "format":
-                body = format_result_to_docx(payload)
+                body = format_result_to_docx(payload, export_style)
             else:
-                body = markdown_to_docx(content, payload.get("title", job["title"]), payload.get("style", ""))
+                body = markdown_to_docx(content, payload.get("title", job["title"]), payload.get("style", ""), export_style)
             filename = download_name(job["title"], "docx")
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         elif output_format in EXPORT_FORMATS:
@@ -452,6 +453,7 @@ class Handler(BaseHTTPRequestHandler):
                 result["formatted_text"] = (body_part + "\n\n参考文献\n\n" + ref_text).strip() if body_part else ref_text
                 result["style"] = js["name"]
                 result["journal_style_id"] = js["id"]
+                result["journal_rules"] = rules
         result["source_name"] = uploaded["filename"]
         result["kind"] = "format"
         result["structure"] = extract_structure(text)
