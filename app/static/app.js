@@ -38,6 +38,7 @@ function activateTabs() {
       document.querySelectorAll(".tab-panel").forEach((item) => item.classList.remove("active"));
       tab.classList.add("active");
       $(`#panel-${tab.dataset.tab}`).classList.add("active");
+      if (tab.dataset.tab === "format") loadFormatJournalStyles();
       if (tab.dataset.tab === "history") loadHistory();
       if (tab.dataset.tab === "journals") loadJournalStyles();
       if (tab.dataset.tab === "stats") loadStats();
