@@ -16,6 +16,7 @@ class Store:
             with closing(self.connect()) as connection:
                 with connection:
                     connection.executescript(self._schema())
+                self._migrate(connection)
         except sqlite3.Error as exc:
             raise RuntimeError(
                 f"数据库初始化失败：{exc}。请检查数据目录 {self.path.parent} 是否可写，"
@@ -26,6 +27,13 @@ class Store:
                 f"无法创建数据库目录 {self.path.parent}：{exc}。"
                 "可通过环境变量 DATA_DIR 指定一个可写目录。"
             ) from exc
+
+    def _migrate(self, connection: sqlite3.Connection) -> None:
+        cursor = connection.execute("PRAGMA table_info(jobs)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "user_id" not in columns:
+            with connection:
+                connection.execute("ALTER TABLE jobs ADD COLUMN user_id INTEGER")
 
     @staticmethod
     def _schema() -> str:
