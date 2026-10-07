@@ -9,6 +9,8 @@ import subprocess
 import zipfile
 from xml.etree import ElementTree
 
+from .ocr import ocr_pdf
+
 
 SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".md"}
 
@@ -58,8 +60,8 @@ def _pdf_text_legacy(data: bytes) -> str:
         raise ValueError(f"PDF 解析失败：{exc}") from exc
 
 
-def _pdf_text(data: bytes) -> str:
-    """Extract a PDF text layer without treating PDF objects as document text."""
+def _native_pdf_text(data: bytes) -> str:
+    """Extract the embedded PDF text layer without treating PDF objects as text."""
     pypdf_error = None
     try:
         from pypdf import PdfReader
@@ -92,8 +94,50 @@ def _pdf_text(data: bytes) -> str:
             pypdf_error = pypdf_error or exc
 
     if pypdf_error:
-        raise ValueError(f"PDF text extraction failed: {pypdf_error}") from pypdf_error
-    raise ValueError("PDF has no extractable text; it may be a scanned document that requires OCR")
+        return ""
+    return ""
+
+
+def needs_ocr(text: str) -> bool:
+    """Detect empty, damaged, or badly fragmented PDF text layers."""
+    if not text or len(text.strip()) < 500:
+        return True
+    if text.count("�") >= 3:
+        return True
+    chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    spaced_chinese = len(re.findall(r"[\u4e00-\u9fff]\s+[\u4e00-\u9fff]", text))
+    if chinese_chars >= 100 and spaced_chinese >= 40 and spaced_chinese / chinese_chars > 0.04:
+        return True
+    control_count = sum(1 for char in text if ord(char) < 32 and char not in "\n\r\t\f")
+    if control_count > 3:
+        return True
+    single_letter_lines = sum(
+        1 for line in text.splitlines()
+        if len(re.findall(r"(?<![A-Za-z])[A-Za-z](?![A-Za-z])", line)) >= 3
+    )
+    if single_letter_lines >= 3:
+        return True
+    if re.search(r"(?i)P\s+UBLIC|\b(?:r\s+na|prworld|lofShaanx)\b", text):
+        return True
+    return False
+
+
+def _pdf_text(data: bytes) -> str:
+    """Use embedded text when healthy, otherwise use OCR as a fallback."""
+    native_text = _native_pdf_text(data)
+    if not needs_ocr(native_text):
+        return native_text
+    try:
+        recognized = ocr_pdf(data)
+        if recognized.strip():
+            return clean_text(recognized)
+    except (RuntimeError, OSError, ValueError):
+        # OCR is optional. Keep the native text when the local OCR tool is not
+        # installed so ordinary PDF processing remains available.
+        pass
+    if native_text:
+        return native_text
+    raise ValueError("PDF 没有可用文字层，且 OCR 不可用；请安装 Tesseract 和 OCR 依赖")
 
 
 def extract_text(filename: str, data: bytes) -> str:

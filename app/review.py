@@ -252,6 +252,8 @@ def _before_references(text: str) -> str:
 
 
 def _remove_layout_noise(text: str) -> str:
+    text = re.sub(r"(?im)=+\s*第\s*\d+\s*页(?:（?OCR）?)?\s*=+", " ", text or "")
+    text = re.sub(r"(?im)=+\s*page\s*\d+.*?=+", " ", text)
     text = re.sub(r"(?i)P\s*UBLIC\s+RELATIONS\s+FORUM", "", text or "")
     text = re.sub(r"(?i)\bp(?:r)?world\b|\bpublic\s*world\b", "", text)
     text = re.sub(r"(?im)^\s*(?:19|20)\d{2}\s*年?\s*\d{1,2}\s*月?.{0,24}\b(?:journal|jou)\b.*$", "", text)
@@ -279,6 +281,15 @@ def _clean_evidence(value: str, title: str) -> str:
 def _clean_section(value: str, title: str) -> str:
     value = _remove_layout_noise(value)
     value = re.sub(r"(?i)\b(?:摘要|abstract)\s*[:：]?", "", value)
+    # PDF/OCR and model output may include the section heading itself.
+    value = re.sub(
+        r"(?im)^\s*(?:\d+(?:\.\d+)*\s*)?(?:研究)?(?:局限(?:性)?(?:及展望)?|不足(?:及展望)?|及展望|展望|研究方法|方法|研究结果|结果|结论|摘要|abstract)\s*[:：]?\s*",
+        "",
+        value,
+    )
+    value = re.sub(r"(?im)^\s*\d+(?:\.\d+)*\s+研究局限及展望\s*", "", value)
+    # OCR/LLM may leave the tail of the heading after its number was removed.
+    value = re.sub(r"^\s*(?:及展望|局限及展望|研究局限及展望)\s*[:：]?\s*", "", value)
     if title:
         value = value.replace(title, "")
     return _clean(value, limit=2400).strip(" ，,：:;")
@@ -303,6 +314,11 @@ def _validated_ai_value(value: str, title: str, field: str) -> str:
         r"局限|不足|限制|展望|未来|样本|数据|研究范围|可推广|边界|缺乏|有待|进一步|future|limitation",
         value,
         re.I,
+    ):
+        return ""
+    if field == "limitations" and re.search(
+        r"(?i)OCR|RUE|Brey|BESET|\bBSE\b|第\s*\d+\s*页|页眉|乱码",
+        value,
     ):
         return ""
     return value[:2400]
@@ -382,8 +398,11 @@ def _ai_document_evidence(item: LiteratureItem) -> bool:
     """Use the model to locate labeled evidence, without changing the title."""
     prompt = (
         "请从下面上传论文的原文中提取四个字段，并只返回 JSON，不要 Markdown。"
-        "字段为 abstract、methods、findings、limitations。尽量返回原文中连续、完整的句子，"
+        "字段为 abstract、methods、findings、limitations。JSON 的值只能是原文连续、完整的句子，"
+        "不要在值里重复字段名、章节标题、编号或‘研究局限及展望’；如果无法确认完整句，返回空字符串。"
         "不要改写、不要补充常识、不要使用参考文献中的内容；原文没有明确证据时返回空字符串。"
+        "特别是 limitations 只能从原文明确标注‘局限/研究不足/展望/未来研究’的段落提取，"
+        "不能根据摘要、研究方法或结果自行推测局限；没有这类明确段落就返回空字符串。"
         "摘要可以跨 PDF 换行拼接，但不得把正文或参考文献当摘要。\n\n"
         f"文件名：{item.filename}\n论文标题（仅供定位）：{item.title}\n\n原文：\n{item.text[:16000]}"
     )

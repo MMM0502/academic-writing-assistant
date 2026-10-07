@@ -1,3 +1,6 @@
 # Optional accuracy improvements. The MVP works with Python standard library only.
 pypdf>=5.0.0
 python-docx>=1.1.0
+pymupdf>=1.24.0
+pytesseract>=0.3.13
+Pillow>=10.0.0

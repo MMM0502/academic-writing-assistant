@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from app.formatters import format_document
-from app.parsers import extract_text, title_from_text
+from app.parsers import extract_text, needs_ocr, title_from_text
 from app.review import build_item, generate_local_review, generate_review
 from app.storage import Store
 
@@ -33,6 +33,15 @@ class ParserTests(unittest.TestCase):
     def test_invalid_pdf_is_not_treated_as_raw_text(self):
         with self.assertRaises(ValueError):
             extract_text("broken.pdf", b"1 0 obj endobj")
+
+    def test_pdf_text_quality_detection(self):
+        self.assertTrue(needs_ocr(""))
+        self.assertTrue(needs_ocr("P UBLIC RELATIONS FORUM\n" + "r na\n" * 3 + "正文" * 300))
+        self.assertFalse(needs_ocr("这是一段正常的论文正文。" * 100))
+
+    def test_pdf_text_quality_detects_spaced_chinese_ocr(self):
+        damaged = ("人 工 智 能 与 大 数 据 研 究。" * 30)
+        self.assertTrue(needs_ocr(damaged))
 
 
 class FormatterTests(unittest.TestCase):
@@ -152,6 +161,34 @@ class ReviewTests(unittest.TestCase):
             "paper.txt",
         )
         self.assertEqual(item.limitations, "")
+
+    def test_section_heading_is_removed_from_limitation(self):
+        item = build_item(
+            "论文标题\n摘要：研究内容。\n"
+            "6.3 研究局限及展望 在数据获取条件的制约下，本文仅选择部分样本。",
+            "paper.txt",
+        )
+        self.assertNotIn("研究局限及展望", item.limitations)
+        self.assertIn("数据获取条件", item.limitations)
+
+    def test_trailing_section_heading_fragment_is_removed(self):
+        item = build_item(
+            "论文标题\n摘要：研究内容。\n"
+            "研究局限及展望：及展望 在撰写过程中受到数据条件制约，本文仅选择部分样本。",
+            "paper.txt",
+        )
+        self.assertFalse(item.limitations.startswith("及展望"))
+        self.assertIn("数据条件制约", item.limitations)
+
+    def test_ocr_page_marker_is_removed(self):
+        item = build_item(
+            "论文标题\n摘要：研究内容。\n"
+            "研究局限及展望：===== 第 1 页（OCR）===== RUE ae Brey BESET ER BSE "
+            "在数据获取条件的制约下，本文仅选择部分样本。",
+            "paper.txt",
+        )
+        self.assertNotIn("第 1 页", item.limitations)
+        self.assertNotIn("OCR", item.limitations)
 
     def test_review_does_not_guess_author_or_abstract_from_body(self):
         item = build_item(
