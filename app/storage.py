@@ -272,6 +272,15 @@ class Store:
                 )
                 return int(cursor.lastrowid)
 
+    def update_journal_style(self, style_id: int, rules: dict, publisher: str = "") -> bool:
+        with closing(self.connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE journal_styles SET publisher = ?, rules = ? WHERE id = ? AND is_builtin = 1",
+                    (publisher, json.dumps(rules, ensure_ascii=False), style_id),
+                )
+                return cursor.rowcount > 0
+
     def list_journal_styles(self) -> list[dict]:
         with closing(self.connect()) as connection:
             rows = connection.execute(

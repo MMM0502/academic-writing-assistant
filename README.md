@@ -67,11 +67,15 @@ $env:LLM_MODEL = "gpt-4o-mini"
 py main.py
 ```
 
+使用 DeepSeek 时，可在 PowerShell 运行 `.\start_deepseek.ps1`，并在隐藏输入提示中粘贴 API Key。该配置用于综述生成和文献字段识别；文献最终格式仍由本地 GB/APA/IEEE 渲染器生成。上传文稿中的参考文献条目会发送到所配置的模型服务。
+
 ## 测试
 
 ```powershell
 py -m unittest discover -s tests -v
 ```
+
+完整的自动化、浏览器、导出和 DeepSeek 测试步骤见 [docs/TESTING.md](docs/TESTING.md)。
 
 ## API 接口
 

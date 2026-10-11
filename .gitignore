@@ -6,5 +6,8 @@ venv/
 data/*.db
 data/*.sqlite3
 uploads/
+.data/
+.data-runtime/
+.data-test/
 .pytest_cache/
 .arts/

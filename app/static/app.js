@@ -242,11 +242,22 @@ async function loadHistory() {
       target.innerHTML = '<div class="empty-state">还没有处理记录。完成一次文稿规整或综述生成后，结果会出现在这里。</div>';
       return;
     }
-    target.innerHTML = data.items.map((item) => `
+    target.innerHTML = data.items.map((item) => {
+      const payload = item.payload || {};
+      const isFormat = item.kind === "format";
+      const citationStyle = payload.citation_style_label ||
+        ({ gb7714: "GB/T 7714-2015", apa7: "APA 7", ieee: "IEEE" }[payload.citation_style]) ||
+        (payload.style && !payload.journal_style_id ? payload.style : "基础规范未记录");
+      const journalStyle = payload.journal_style_name || payload.journal_rules && payload.style;
+      const formatTag = isFormat
+        ? `<span class="chip chip-ok">${escapeHtml(journalStyle ? `${journalStyle}（基础规范：${citationStyle}）` : citationStyle)}</span>`
+        : "";
+      return `
       <div class="history-item">
-        <div><span class="history-type">${item.kind === "format" ? "文稿规整" : "综述生成"}</span><h3>${escapeHtml(item.title)}</h3><p>${new Date(item.created_at).toLocaleString("zh-CN")}</p></div>
+        <div><span class="history-type">${isFormat ? "文稿规整" : "综述生成"}</span>${formatTag}<h3>${escapeHtml(item.title)}</h3><p>${new Date(item.created_at).toLocaleString("zh-CN")}</p></div>
         <div>${renderExportButtons(item.id, item.kind)}</div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
   } catch {
     target.innerHTML = '<div class="warning">历史记录读取失败，请检查服务是否仍在运行。</div>';
   }

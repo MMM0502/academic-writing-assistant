@@ -564,33 +564,14 @@ def references_to_endnote(references: list[dict]) -> str:
 def references_to_plaintext(references: list[dict]) -> str:
     lines = []
     for ref in references:
-        index = ref.get("index", "")
-        authors = ref.get("authors", "")
-        title = ref.get("title", "")
-        source = ref.get("source", "")
-        year = ref.get("year", "")
-        volume = ref.get("volume", "")
-        issue = ref.get("issue", "")
-        pages = ref.get("pages", "")
-        doi = ref.get("doi", "")
-        parts = [f"[{index}]"]
-        if authors:
-            parts.append(authors)
-        if title:
-            parts.append(title)
-        if source:
-            parts.append(source)
-        if volume:
-            parts.append(f"Vol.{volume}")
-        if issue:
-            parts.append(f"No.{issue}")
-        if pages:
-            parts.append(f"pp.{pages}")
-        if year:
-            parts.append(year)
-        if doi:
-            parts.append(f"DOI:{doi}")
-        lines.append(". ".join(parts) + ".")
+        formatted = str(ref.get("formatted") or "").strip()
+        if not formatted:
+            index = ref.get("index", "")
+            parts = [f"[{index}]", ref.get("authors", ""), ref.get("title", ""), ref.get("source", "")]
+            if ref.get("year"):
+                parts.append(str(ref["year"]))
+            formatted = ". ".join(part for part in parts if part) + "."
+        lines.append(formatted)
     return "\n".join(lines)
 
 

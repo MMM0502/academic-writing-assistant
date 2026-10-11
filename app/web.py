@@ -12,7 +12,8 @@ from urllib.parse import parse_qs, urlparse
 from .config import settings
 from .exporters import download_name, format_result_to_docx, markdown_to_docx, preserve_original_docx, references_to_format, EXPORT_FORMATS, rules_to_export_style
 from .formatters import REFERENCE_TYPE_LABELS, STYLE_LABELS, check_citations, format_document, format_references
-from .llm import get_status as get_llm_status
+from .citation_engine import render_references
+from .llm import get_status as get_llm_status, normalize_references
 from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
@@ -175,6 +176,12 @@ class Handler(BaseHTTPRequestHandler):
                 body = markdown_to_docx(content, payload.get("title", job["title"]), payload.get("style", ""), export_style)
             filename = download_name(job["title"], "docx")
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif output_format == "txt":
+            # TXT is the human-readable export and must include the complete
+            # formatted manuscript, including the body and its references.
+            body = content.encode("utf-8")
+            filename = download_name(job["title"], "txt")
+            content_type = EXPORT_FORMATS["txt"]["content_type"]
         elif output_format in EXPORT_FORMATS:
             references = payload.get("references", [])
             if not references:
@@ -438,6 +445,37 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("文件中可识别的正文过少，请检查文件内容。")
         style = fields.get("style", "gb7714")
         result = format_document(text, style)
+        result["citation_style"] = style
+        result["citation_style_label"] = STYLE_LABELS.get(style, style)
+        citation_rules = {"sort_order": "citation_order"}
+        ordered = render_references(result["references"], style, citation_rules)
+        result["references"] = ordered
+        ref_text = "\n".join(ref["formatted"] for ref in ordered)
+        body_part = result.get("body_text", "")
+        result["formatted_text"] = (body_part + "\n\n参考文献\n\n" + ref_text).strip() if body_part else ref_text
+        llm_status = get_llm_status()
+        if llm_status["configured"] and result["references"]:
+            llm_result = normalize_references(result["references"], style)
+            result["llm_status"] = {
+                **llm_status,
+                "status": llm_result["status"] if llm_result else "skipped",
+                "elapsed_seconds": llm_result.get("elapsed_seconds") if llm_result else 0,
+                "error": llm_result.get("error") if llm_result else None,
+            }
+            if llm_result and llm_result["status"] == "success":
+                updates = {str(item["index"]): item for item in llm_result["references"]}
+                for ref in result["references"]:
+                    update = updates.get(str(ref.get("index")))
+                    if not update:
+                        continue
+                    for field in ("authors", "title", "source", "year", "volume", "issue", "pages", "doi", "url", "reference_type"):
+                        value = update.get(field, "")
+                        if value:
+                            ref[field] = value
+                ordered = render_references(result["references"], style, citation_rules)
+                result["references"] = ordered
+                ref_text = "\n".join(ref["formatted"] for ref in ordered)
+                result["formatted_text"] = (body_part + "\n\n鍙傝€冩枃鐚甛n\n" + ref_text).strip() if body_part else ref_text
         journal_style_id = fields.get("journal_style_id", "")
         if journal_style_id:
             try:
@@ -446,12 +484,15 @@ class Handler(BaseHTTPRequestHandler):
                 js = None
             if js:
                 rules = js["rules"]
-                for ref in result["references"]:
-                    ref["formatted"] = journals.format_reference_by_rules(ref, rules, ref["index"])
-                ref_text = "\n".join(ref["formatted"] for ref in result["references"])
+                # Citation grammar comes from the selected GB/APA/IEEE style;
+                # the journal template only contributes layout metadata.
+                ordered = render_references(result["references"], style, citation_rules)
+                result["references"] = ordered
+                ref_text = "\n".join(ref["formatted"] for ref in ordered)
                 body_part = result.get("body_text", "")
                 result["formatted_text"] = (body_part + "\n\n参考文献\n\n" + ref_text).strip() if body_part else ref_text
                 result["style"] = js["name"]
+                result["journal_style_name"] = js["name"]
                 result["journal_style_id"] = js["id"]
                 result["journal_rules"] = rules
         result["source_name"] = uploaded["filename"]

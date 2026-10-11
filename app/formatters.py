@@ -266,6 +266,7 @@ def parse_reference(raw: str, index: int, style: str) -> Reference:
 
     doi = _extract_doi(line)
     if doi:
+        line = re.sub(r"\bdoi\s*:\s*", "", line, flags=re.I)
         line = re.sub(re.escape(doi), "", line).strip(" ,.;；")
 
     url = _extract_url(line)
@@ -278,6 +279,9 @@ def parse_reference(raw: str, index: int, style: str) -> Reference:
     year = year_match.group(0) if year_match else ""
     if year:
         line = re.sub(rf"\b{re.escape(year)}\b", "", line).strip(" ,.;；，")
+    line = re.sub(r",\s*,+", ",", line)
+    line = re.sub(r"\s*\.\s*,", ".", line)
+    line = line.strip(" ,.;；，")
     if not year:
         year = "n.d."
         errors.append({"field": "year", "message": "未识别出出版年份", "severity": "warning"})

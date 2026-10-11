@@ -164,7 +164,9 @@ class ApiEndToEndTests(unittest.TestCase):
 
         status, history = self.request("/api/history")
         self.assertEqual(status, 200)
-        self.assertTrue(any(item["id"] == job_id for item in history["items"]))
+        history_item = next(item for item in history["items"] if item["id"] == job_id)
+        self.assertEqual(history_item["payload"]["citation_style"], "gb7714")
+        self.assertEqual(history_item["payload"]["citation_style_label"], "GB/T 7714-2015")
 
         status, detail = self.request(f"/api/history/{job_id}")
         self.assertEqual(status, 200)
@@ -174,6 +176,12 @@ class ApiEndToEndTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIsInstance(markdown, bytes)
         self.assertIn("参考文献".encode("utf-8"), markdown)
+
+        status, text = self.request(f"/api/download/{job_id}?format=txt")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(text, bytes)
+        self.assertIn("正文内容如".encode("utf-8"), text)
+        self.assertIn("参考文献".encode("utf-8"), text)
 
         status, docx = self.request(f"/api/download/{job_id}?format=docx")
         self.assertEqual(status, 200)
