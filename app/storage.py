@@ -83,6 +83,20 @@ class Store:
             created_by INTEGER,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS school_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            degree TEXT NOT NULL,
+            school TEXT NOT NULL COLLATE NOCASE,
+            college TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            published_date TEXT NOT NULL DEFAULT '',
+            snippet TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'candidate',
+            created_at TEXT NOT NULL,
+            UNIQUE(degree, school, college, url)
+        );
         """
 
     def connect(self) -> sqlite3.Connection:
@@ -296,6 +310,28 @@ class Store:
         if not row:
             return None
         return {"id": row["id"], "name": row["name"], "publisher": row["publisher"], "rules": json.loads(row["rules"]), "is_builtin": bool(row["is_builtin"]), "created_by": row["created_by"], "created_at": row["created_at"]}
+
+    def list_school_templates(self, degree: str, school: str, college: str = "") -> list[dict]:
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                "SELECT * FROM school_templates WHERE degree = ? AND school = ? AND (college = ? OR college = '') ORDER BY CASE WHEN college = ? THEN 0 ELSE 1 END, created_at DESC",
+                (degree, school.strip(), college.strip(), college.strip()),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_school_template(self, item: dict) -> int:
+        created_at = datetime.now(timezone.utc).isoformat()
+        with closing(self.connect()) as connection:
+            with connection:
+                connection.execute(
+                    "INSERT OR IGNORE INTO school_templates(degree, school, college, title, url, domain, published_date, snippet, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)",
+                    (item["degree"], item["school"].strip(), item.get("college", "").strip(), item["title"], item["url"], item["domain"], item.get("published_date", ""), item.get("snippet", ""), created_at),
+                )
+                row = connection.execute(
+                    "SELECT id FROM school_templates WHERE degree = ? AND school = ? AND college = ? AND url = ?",
+                    (item["degree"], item["school"].strip(), item.get("college", "").strip(), item["url"]),
+                ).fetchone()
+                return int(row["id"])
 
     def delete_journal_style(self, style_id: int) -> bool:
         with closing(self.connect()) as connection:

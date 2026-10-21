@@ -68,6 +68,18 @@ py main.py
 ```
 
 使用 DeepSeek 时，可在 PowerShell 运行 `.\start_deepseek.ps1`，并在隐藏输入提示中粘贴 API Key。该配置用于综述生成和文献字段识别；文献最终格式仍由本地 GB/APA/IEEE 渲染器生成。上传文稿中的参考文献条目会发送到所配置的模型服务。
+## 学校论文模板搜索
+
+首页的学校格式页支持按学历、学校和学院搜索论文模板候选。缓存未命中时使用 Tavily 搜索 API；搜索结果会保存在本地 SQLite 中，状态为“待人工核验”，不会自动认定为学校官方最新版本。
+
+配置 Tavily API Key 后重启服务：
+
+```powershell
+$env:TAVILY_API_KEY = "your-tavily-api-key"
+py main.py
+```
+
+可通过 `TAVILY_API_URL` 覆盖默认搜索接口。候选来源及检索摘要保存在 `school_templates` 表中。网页日期和教育域名仅作线索，使用前仍需打开来源核对发布部门、适用学院/学历和版本。
 
 ## 测试
 

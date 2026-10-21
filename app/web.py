@@ -17,7 +17,7 @@ from .llm import get_status as get_llm_status, normalize_references
 from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
-from . import auth, journals, stats
+from . import auth, journals, stats, template_search
 
 
 ROOT = Path(__file__).resolve().parent
@@ -103,6 +103,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_payload(HTTPStatus.OK, {"user": None})
         elif parsed.path == "/api/journal-styles":
             self.send_payload(HTTPStatus.OK, {"styles": journals.list_styles(store)})
+        elif parsed.path == "/api/templates/search":
+            query = parse_qs(parsed.query)
+            try:
+                result = template_search.search_templates(
+                    store,
+                    query.get("degree", [""])[0],
+                    query.get("school", [""])[0],
+                    query.get("college", [""])[0],
+                )
+                self.send_payload(HTTPStatus.OK, result)
+            except ValueError as exc:
+                self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         elif parsed.path.startswith("/api/journal-styles/"):
             try:
                 style_id = int(parsed.path.rsplit("/", 1)[-1])
@@ -209,7 +221,7 @@ class Handler(BaseHTTPRequestHandler):
 
     JSON_POST_PATHS = {
         "/api/auth/register", "/api/auth/login", "/api/auth/logout",
-        "/api/journal-styles", "/api/comments", "/api/shares",
+        "/api/journal-styles", "/api/comments", "/api/shares", "/api/templates/cache",
     }
     MULTIPART_POST_PATHS = {
         "/api/format", "/api/review", "/api/check-citations", "/api/review/edit",
@@ -232,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.handle_add_comment(data)
                 elif parsed.path == "/api/shares":
                     self.handle_create_share(data)
+                elif parsed.path == "/api/templates/cache":
+                    self.send_payload(HTTPStatus.CREATED, template_search.cache_candidate(store, data))
             except ValueError as exc:
                 self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except Exception as exc:

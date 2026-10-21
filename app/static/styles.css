@@ -161,5 +161,34 @@ select:focus, input[type=text]:focus { border-color: var(--teal); }
 .journal-style-form .field span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .journal-style-form input, .journal-style-form select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 
+.school-finder { padding: 4px 0 8px; }
+.school-finder .form-row { align-items: end; }
+.school-autocomplete-field { position: relative; min-width: 0; }
+.school-autocomplete-field > label { display: block; margin-bottom: 9px; }
+.school-autocomplete-field > label span { color: var(--muted); font-size: 12px; }
+.school-suggestions { position: absolute; z-index: 20; top: calc(100% - 19px); left: 0; right: 0; max-height: 260px; overflow-y: auto; background: white; border: 1px solid var(--line); box-shadow: 0 8px 20px rgba(23,33,43,.12); }
+.school-suggestions[hidden] { display: none; }
+.school-suggestion { display: block; width: 100%; border: 0; border-bottom: 1px solid #edf0f1; padding: 11px 14px; background: white; color: var(--ink); text-align: left; font-size: 13px; }
+.school-suggestion:hover, .school-suggestion.active { background: var(--soft-teal); color: var(--teal-dark); }
+.school-live-card { border: 1px solid var(--line); border-left: 3px solid var(--teal); background: white; padding: 20px 22px; }
+.school-live-card h3 { margin: 8px 0 5px; font: 500 22px Georgia, "Microsoft YaHei", serif; overflow-wrap: anywhere; }
+.school-live-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.school-recommendation { margin-top: 14px; }
+.school-result.has-recommendation .school-live-card { display: none; }
+.school-finder input { width: 100%; border: 1px solid var(--line); border-radius: 3px; color: var(--ink); background: white; padding: 13px 14px; outline: none; }
+.school-finder input:focus { border-color: var(--teal); }
+.school-note { color: var(--muted); font-size: 13px; line-height: 1.8; margin: 18px 0 0; }
+.school-actions { margin-top: 20px; }
+.school-actions .primary-button { margin: 0; }
+.template-search-button { margin-top: 12px; }
+.template-search-results { margin-top: 12px; }
+.template-search-notice { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.template-source { border-top: 1px solid var(--line); padding: 16px 2px; }
+.template-source h3 { margin: 7px 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.template-source h3 a { color: var(--ink); text-decoration-color: var(--line); }
+.template-source h3 a:hover { color: var(--teal-dark); }
+.template-source p { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 0 0 7px; }
+.template-source small { color: var(--muted); font-size: 11px; }
+
 .journal-builtin { margin-bottom: 16px; }
 .journal-custom .history-item { margin-bottom: 8px; }

@@ -19,6 +19,8 @@ class Settings:
     llm_api_url: str = os.getenv("LLM_API_URL", "")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    template_search_api_key: str = os.getenv("TAVILY_API_KEY", "")
+    template_search_api_url: str = os.getenv("TAVILY_API_URL", "https://api.tavily.com/search")
 
 
 settings = Settings()

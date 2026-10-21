@@ -62,15 +62,45 @@
     </section>
 
     <nav class="tabs" aria-label="功能导航">
-      <button class="tab active" data-tab="format"><span>01</span>文稿规整</button>
-      <button class="tab" data-tab="review"><span>02</span>综述生成</button>
-      <button class="tab" data-tab="history"><span>03</span>处理记录</button>
-      <button class="tab" data-tab="journals"><span>04</span>期刊格式</button>
-      <button class="tab" data-tab="stats"><span>05</span>统计看板</button>
+      <button class="tab active" data-tab="school"><span>01</span>学校格式推荐</button>
+      <button class="tab" data-tab="format"><span>02</span>文稿规整</button>
+      <button class="tab" data-tab="review"><span>03</span>综述生成</button>
+      <button class="tab" data-tab="history"><span>04</span>处理记录</button>
+      <button class="tab" data-tab="journals"><span>05</span>期刊格式</button>
+      <button class="tab" data-tab="stats"><span>06</span>统计看板</button>
     </nav>
 
     <section class="workspace">
-      <div class="panel tab-panel active" id="panel-format">
+      <div class="panel tab-panel active" id="panel-school">
+        <div class="panel-heading">
+          <div><p class="kicker">THESIS FORMAT FINDER</p><h2>按学历与学校推荐论文格式</h2></div>
+        </div>
+        <form id="school-form" class="school-finder">
+          <div class="form-row">
+            <label class="field"><span>学历层次</span>
+              <select name="degree" required>
+                <option value="associate">专科</option>
+                <option value="undergraduate">本科</option>
+                <option value="graduate">研究生</option>
+                <option value="doctoral">博士生</option>
+              </select>
+            </label>
+            <div class="field school-autocomplete-field"><label for="school-name"><span>学校名称</span></label>
+              <input id="school-name" type="text" name="school" autocomplete="off" placeholder="请输入学校名称" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="school-suggestions">
+              <div id="school-suggestions" class="school-suggestions" role="listbox" hidden></div>
+            </div>
+            <label class="field"><span>学院（可选）</span>
+              <input type="text" name="college" placeholder="请输入学院名称">
+            </label>
+            <button class="primary-button" type="submit">查看推荐<span>→</span></button>
+          </div>
+          <button class="small-button template-search-button" id="search-school-templates" type="button">搜索最新网页模板</button>
+        </form>
+        <div class="result-area" id="school-result" aria-live="polite"></div>
+        <div id="template-search-results" class="template-search-results" aria-live="polite"></div>
+      </div>
+
+      <div class="panel tab-panel" id="panel-format">
         <div class="panel-heading">
           <div><p class="kicker">MANUSCRIPT NORMALIZER</p><h2>单篇文稿规整</h2></div>
           <span class="pill">支持 DOCX / PDF / TXT</span>
