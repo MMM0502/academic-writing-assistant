@@ -10,6 +10,32 @@ def _default_data_dir() -> Path:
     return Path.home() / ".academic-assistant"
 
 
+def _load_env_file() -> None:
+    """读取项目根目录（以及 DATA_DIR）下的 .env；已存在的环境变量优先。"""
+    candidates = [Path(__file__).resolve().parent.parent / ".env"]
+    data_dir = os.getenv("DATA_DIR")
+    if data_dir:
+        candidates.append(Path(data_dir) / ".env")
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+        except OSError:
+            continue
+
+
+_load_env_file()
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("HOST", "127.0.0.1")
