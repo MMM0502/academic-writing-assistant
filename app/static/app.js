@@ -265,7 +265,7 @@ function renderFormatSchoolHint() {
       });
     }
   } else {
-    hint.textContent = "未选择学校模板：导出时只应用引用规范与期刊样式，不改变正文排版。";
+    hint.textContent = "未选择学校模板：导出时只应用引用规范与自定义格式，不改变正文排版。";
   }
 }
 
@@ -462,15 +462,15 @@ $("#school-form").addEventListener("submit", (event) => {
 const CONFIDENCE_LABELS = { high: "高相关", medium: "中等相关", low: "参考" };
 
 function renderCustomStyleShortcut(target) {
-  target.innerHTML += `<div class="actions"><button class="small-button" id="go-custom-style">用自定义格式继续（05 期刊格式）</button></div>`;
+  target.innerHTML += `<div class="actions"><button class="small-button" id="go-custom-style">用自定义格式继续（02 自定义格式）</button></div>`;
   $("#go-custom-style").addEventListener("click", () => {
     switchTab("journals");
-    showToast("在 05 期刊格式里创建或选择自定义格式");
+    showToast("在 02 自定义格式里创建或选择自定义格式");
   });
 }
 
 function renderSearchUnavailable(target) {
-  target.innerHTML = `<div class="empty-state">检索服务未启用。<br>部署者需在启动前设置环境变量 <code>TAVILY_API_KEY</code>，重启后即可联网检索。<br>也可以先用 05 期刊格式里的自定义排版继续。</div>`;
+  target.innerHTML = `<div class="empty-state">检索服务未启用。<br>部署者需在启动前设置环境变量 <code>TAVILY_API_KEY</code>，重启后即可联网检索。<br>也可以先用 02 自定义格式里的排版继续。</div>`;
   renderCustomStyleShortcut(target);
 }
 
@@ -882,7 +882,7 @@ async function loadJournalStyles() {
     const response = await fetch("/api/journal-styles");
     const data = await response.json();
     if (!data.styles.length) {
-      target.innerHTML = '<div class="empty-state">暂无期刊格式。</div>';
+      target.innerHTML = '<div class="empty-state">暂无自定义格式。</div>';
       return;
     }
     const builtin = data.styles.filter((s) => s.is_builtin);
@@ -904,7 +904,7 @@ async function loadJournalStyles() {
     }
     target.innerHTML = html;
   } catch {
-    target.innerHTML = '<div class="warning">期刊格式加载失败。</div>';
+    target.innerHTML = '<div class="warning">自定义格式加载失败。</div>';
   }
 }
 
@@ -1216,12 +1216,53 @@ async function loadFormatJournalStyles() {
   } catch {}
 }
 
+function renderStatsChart(points) {
+  const target = $("#stats-chart");
+  if (!target) return;
+  if (!points || !points.length) {
+    target.innerHTML = '<div class="empty-state">暂无趋势数据。</div>';
+    return;
+  }
+  const width = 760;
+  const height = 220;
+  const pad = { top: 18, right: 16, bottom: 30, left: 44 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const max = Math.max(1, ...points.map((point) => point.count));
+  const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW;
+  const coords = points.map((point, index) => [
+    pad.left + index * stepX,
+    pad.top + innerH - (point.count / max) * innerH,
+  ]);
+  const line = coords.map(([x, y], index) => `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${line} L${coords[coords.length - 1][0].toFixed(1)},${pad.top + innerH} L${coords[0][0].toFixed(1)},${pad.top + innerH} Z`;
+  const grid = [0, 0.5, 1].map((ratio) => {
+    const y = pad.top + innerH - ratio * innerH;
+    const value = Math.round(ratio * max);
+    return `<line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${width - pad.right}" y2="${y.toFixed(1)}" stroke="#e6eeee" stroke-width="1"/>`
+      + `<text x="${pad.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="chart-axis">${value}</text>`;
+  }).join("");
+  const dots = coords.map(([x, y], index) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#0f766e"><title>${points[index].date}: ${points[index].count} 次</title></circle>`).join("");
+  const labels = points.map((point, index) => {
+    if (index % 2 !== 0 && index !== points.length - 1) return "";
+    return `<text x="${coords[index][0].toFixed(1)}" y="${height - 8}" text-anchor="middle" class="chart-axis">${point.date}</text>`;
+  }).join("");
+  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="近 14 天处理次数折线图">
+    ${grid}
+    <path d="${area}" fill="#0f766e" fill-opacity="0.08"/>
+    <path d="${line}" fill="none" stroke="#0f766e" stroke-width="2"/>
+    ${dots}
+    ${labels}
+  </svg>`;
+}
+
 async function loadStats() {
   const target = $("#stats-content");
   try {
     const response = await fetch("/api/stats", { headers: getAuthHeaders() });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "加载失败");
+    renderStatsChart(data.daily_counts || []);
     const styleDist = Object.entries(data.style_distribution || {}).map(([k, v]) => `<span class="chip">${escapeHtml(k)}: ${v}</span>`).join("");
     target.innerHTML = `
       <div class="metrics">

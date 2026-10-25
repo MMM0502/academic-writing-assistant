@@ -63,10 +63,10 @@
 
     <nav class="tabs" aria-label="功能导航">
       <button class="tab active" data-tab="school"><span>01</span>学校格式推荐</button>
-      <button class="tab" data-tab="format"><span>02</span>文稿规整</button>
-      <button class="tab" data-tab="review"><span>03</span>综述生成</button>
-      <button class="tab" data-tab="history"><span>04</span>处理记录</button>
-      <button class="tab" data-tab="journals"><span>05</span>期刊格式</button>
+      <button class="tab" data-tab="journals"><span>02</span>自定义格式</button>
+      <button class="tab" data-tab="format"><span>03</span>文稿规整</button>
+      <button class="tab" data-tab="review"><span>04</span>综述生成</button>
+      <button class="tab" data-tab="history"><span>05</span>处理记录</button>
       <button class="tab" data-tab="stats"><span>06</span>统计看板</button>
     </nav>
 
@@ -121,7 +121,7 @@
                 <option value="ieee">IEEE</option>
               </select>
             </label>
-            <label class="field"><span>期刊格式 <small>可选，覆盖引用规范</small></span>
+            <label class="field"><span>自定义格式 <small>可选，覆盖引用规范</small></span>
               <select name="journal_style_id" id="format-journal-style">
                 <option value="">不使用</option>
               </select>
@@ -164,10 +164,10 @@
 
       <div class="panel tab-panel" id="panel-journals">
         <div class="panel-heading">
-          <div><p class="kicker">JOURNAL STYLES</p><h2>期刊格式库</h2></div>
+          <div><p class="kicker">CUSTOM FORMATS</p><h2>自定义格式库</h2></div>
           <span class="pill">预设 + 自定义</span>
         </div>
-        <div id="journal-list" class="history-list"><div class="empty-state">正在加载期刊格式...</div></div>
+        <div id="journal-list" class="history-list"><div class="empty-state">正在加载自定义格式...</div></div>
         <div class="panel-heading" style="margin-top:1.5rem;">
           <div><p class="kicker">CUSTOM STYLE</p><h2>创建自定义格式</h2></div>
         </div>
@@ -499,6 +499,10 @@
           <div><p class="kicker">DASHBOARD</p><h2>统计看板</h2></div>
           <span class="pill">处理量与质量指标</span>
         </div>
+        <div class="panel-heading" style="margin-top:1rem;">
+          <div><p class="kicker">TREND</p><h2>近 14 天处理次数</h2></div>
+        </div>
+        <div id="stats-chart" class="stats-chart"><div class="empty-state">正在加载趋势...</div></div>
         <div id="stats-content"><div class="empty-state">正在加载统计数据...</div></div>
       </div>
     </section>

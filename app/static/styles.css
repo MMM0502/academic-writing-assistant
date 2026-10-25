@@ -224,3 +224,8 @@ select:focus, input[type=text]:focus { border-color: var(--teal); }
 .backend-outdated b { color: #991b1b; }
 
 .backend-outdated-link { color: #991b1b; font-weight: 600; text-decoration: underline; margin-left: .35rem; }
+
+/* 统计折线图 */
+.stats-chart { background: #fff; border: 1px solid #e2e8e8; border-radius: 8px; padding: .6rem .8rem; margin-bottom: 1rem; }
+.stats-chart svg { width: 100%; height: auto; display: block; }
+.stats-chart .chart-axis { font-size: 11px; fill: #6b7c7c; }

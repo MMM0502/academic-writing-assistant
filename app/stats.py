@@ -50,6 +50,14 @@ def get_stats(store: Store, user_id: int | None = None) -> dict:
     recent_day = sum(1 for j in jobs if _parse_time(j["created_at"]) > day_ago)
     recent_week = sum(1 for j in jobs if _parse_time(j["created_at"]) > week_ago)
 
+    day_counts: Counter = Counter()
+    for job in jobs:
+        day_counts[_parse_time(job["created_at"]).date()] += 1
+    daily_counts = []
+    for offset in range(13, -1, -1):
+        day = (now - timedelta(days=offset)).date()
+        daily_counts.append({"date": day.strftime("%m-%d"), "count": day_counts.get(day, 0)})
+
     avg_llm_time = round(sum(llm_elapsed) / len(llm_elapsed), 2) if llm_elapsed else 0
     llm_success_rate = round((llm_calls - llm_failures) / llm_calls * 100, 1) if llm_calls else 0
 
@@ -67,6 +75,7 @@ def get_stats(store: Store, user_id: int | None = None) -> dict:
         "llm_failures": llm_failures,
         "llm_success_rate": llm_success_rate,
         "avg_llm_elapsed_seconds": avg_llm_time,
+        "daily_counts": daily_counts,
     }
 
 
