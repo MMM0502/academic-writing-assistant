@@ -17,7 +17,7 @@ from .llm import get_status as get_llm_status, normalize_references
 from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
-from . import auth, journals, stats, template_search
+from . import auth, format_extract, journals, stats, template_search
 
 
 ROOT = Path(__file__).resolve().parent
@@ -95,6 +95,20 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif parsed.path == "/api/llm-status":
             self.send_payload(HTTPStatus.OK, get_llm_status())
+        elif parsed.path == "/api/templates/rules":
+            query = parse_qs(parsed.query)
+            rules = store.get_template_rules(
+                query.get("degree", [""])[0],
+                query.get("school", [""])[0],
+                query.get("college", [""])[0],
+            )
+            if not rules:
+                self.send_payload(HTTPStatus.NOT_FOUND, {"error": "尚未保存该校的格式规则。"})
+            else:
+                self.send_payload(HTTPStatus.OK, rules)
+        elif parsed.path == "/api/settings/tavily":
+            api_key, source = template_search.resolve_api_key(store)
+            self.send_payload(HTTPStatus.OK, {"configured": bool(api_key), "source": source})
         elif parsed.path == "/api/auth/me":
             user = self._get_current_user()
             if user:
@@ -111,6 +125,7 @@ class Handler(BaseHTTPRequestHandler):
                     query.get("degree", [""])[0],
                     query.get("school", [""])[0],
                     query.get("college", [""])[0],
+                    query.get("refresh", [""])[0] in {"1", "true", "yes"},
                 )
                 self.send_payload(HTTPStatus.OK, result)
             except ValueError as exc:
@@ -177,7 +192,8 @@ class Handler(BaseHTTPRequestHandler):
         output_format = query.get("format", ["md"])[0].lower()
         mode = query.get("mode", ["rebuild"])[0].lower()
         if output_format == "docx":
-            export_style = rules_to_export_style(payload.get("journal_rules")) if payload.get("journal_rules") else None
+            layout_rules = payload.get("school_rules") or payload.get("journal_rules")
+            export_style = rules_to_export_style(layout_rules) if layout_rules else None
             if mode == "preserve" and payload.get("source_data"):
                 import base64
                 original_data = base64.b64decode(payload["source_data"])
@@ -221,10 +237,10 @@ class Handler(BaseHTTPRequestHandler):
 
     JSON_POST_PATHS = {
         "/api/auth/register", "/api/auth/login", "/api/auth/logout",
-        "/api/journal-styles", "/api/comments", "/api/shares", "/api/templates/cache",
+        "/api/journal-styles", "/api/comments", "/api/shares", "/api/templates/cache", "/api/settings/tavily", "/api/templates/rules",
     }
     MULTIPART_POST_PATHS = {
-        "/api/format", "/api/review", "/api/check-citations", "/api/review/edit",
+        "/api/format", "/api/review", "/api/check-citations", "/api/review/edit", "/api/templates/extract",
     }
 
     def do_POST(self) -> None:
@@ -246,6 +262,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.handle_create_share(data)
                 elif parsed.path == "/api/templates/cache":
                     self.send_payload(HTTPStatus.CREATED, template_search.cache_candidate(store, data))
+                elif parsed.path == "/api/settings/tavily":
+                    self.handle_set_tavily_key(data)
+                elif parsed.path == "/api/templates/rules":
+                    self.handle_save_template_rules(data)
             except ValueError as exc:
                 self.send_payload(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except Exception as exc:
@@ -254,7 +274,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in self.MULTIPART_POST_PATHS:
             try:
                 fields = self.parse_multipart()
-                if parsed.path == "/api/format":
+                if parsed.path == "/api/templates/extract":
+                    self.handle_extract_template(fields)
+                elif parsed.path == "/api/format":
                     self.handle_format(fields)
                 elif parsed.path == "/api/check-citations":
                     self.handle_check_citations(fields)
@@ -269,6 +291,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_payload(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
 
+    def handle_extract_template(self, fields: dict) -> None:
+        files = fields.get("files") or []
+        if not files:
+            raise ValueError("请选择一个 .docx 模板文件。")
+        item = files[0]
+        filename = str(item.get("filename", ""))
+        if not filename.lower().endswith(".docx"):
+            raise ValueError("格式抽取目前只支持 .docx；.doc 请先在 Word 里另存为 .docx，PDF 需人工整理。")
+        result = format_extract.extract_docx_rules(item["data"])
+        self.send_payload(HTTPStatus.OK, {"filename": filename, **result})
+
+    def handle_save_template_rules(self, data: dict) -> None:
+        degree = str(data.get("degree", "")).strip()
+        school = str(data.get("school", "")).strip()
+        rules = data.get("rules") or {}
+        if degree not in template_search.DEGREE_LABELS:
+            raise ValueError("学历层次无效。")
+        if not school:
+            raise ValueError("请提供学校名称。")
+        if not isinstance(rules, dict) or not rules:
+            raise ValueError("规则内容为空。")
+        saved = store.save_template_rules(
+            degree,
+            school,
+            str(data.get("college", "")).strip(),
+            rules,
+            template_id=data.get("template_id"),
+            confidence=float(data.get("confidence") or 0),
+            source=str(data.get("source") or "docx"),
+            verified=bool(data.get("verified", True)),
+        )
+        self.send_payload(HTTPStatus.CREATED, saved)
+
+    def handle_set_tavily_key(self, data: dict) -> None:
+        api_key = str(data.get("api_key", "")).strip()
+        if api_key and len(api_key) < 8:
+            raise ValueError("搜索 Key 看起来不完整。")
+        store.set_setting("tavily_api_key", api_key)
+        self.send_payload(HTTPStatus.OK, {"configured": bool(api_key), "source": "settings" if api_key else "none"})
+
     def parse_json_body(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
         if content_length <= 0:
@@ -277,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
         if not body:
             return {}
         try:
-            data = json.loads(body.decode("utf-8"))
+            data = json.loads(body.decode("utf-8-sig"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError(f"JSON 解析失败：{exc}")
         if not isinstance(data, dict):
@@ -454,6 +516,8 @@ class Handler(BaseHTTPRequestHandler):
         if not files:
             raise ValueError("请上传一篇 DOCX、PDF 或 TXT 文稿。")
         uploaded = files[0]
+        if uploaded["filename"].lower().endswith(".doc"):
+            raise ValueError("暂不支持 .doc 格式：请在 Word 中“另存为 .docx”后再上传。")
         text = extract_text(uploaded["filename"], uploaded["data"])
         if len(text) < 20:
             raise ValueError("文件中可识别的正文过少，请检查文件内容。")
@@ -509,6 +573,18 @@ class Handler(BaseHTTPRequestHandler):
                 result["journal_style_name"] = js["name"]
                 result["journal_style_id"] = js["id"]
                 result["journal_rules"] = rules
+        school_degree = fields.get("school_degree", "")
+        school_name = fields.get("school_name", "")
+        if school_degree and school_name:
+            saved_rules = store.get_template_rules(school_degree, school_name, fields.get("school_college", ""))
+            if saved_rules:
+                result["school_rules"] = saved_rules["rules"]
+                result["school_template"] = {
+                    "degree": saved_rules["degree"],
+                    "school": saved_rules["school"],
+                    "college": saved_rules["college"],
+                    "confidence": saved_rules["confidence"],
+                }
         result["source_name"] = uploaded["filename"]
         result["kind"] = "format"
         result["structure"] = extract_structure(text)
@@ -599,6 +675,8 @@ class Handler(BaseHTTPRequestHandler):
 def run_server() -> None:
     server = ThreadingHTTPServer((settings.host, settings.port), Handler)
     print(f"Academic Assistant running at http://{settings.host}:{settings.port}")
+    if not template_search.resolve_api_key(store)[0]:
+        print("  [提示] 未设置 TAVILY_API_KEY，学校模板联网检索不可用；本地推荐、文稿规整与自定义格式不受影响。")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

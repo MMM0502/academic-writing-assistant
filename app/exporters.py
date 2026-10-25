@@ -61,6 +61,10 @@ class ExportStyle:
     paragraph_space_after: int = 0
     page_header: str = ""
     page_number_pos: str = "center"
+    line_spacing_exact: int = 0
+    heading1_alignment: str = "center"
+    heading2_alignment: str = "left"
+    heading3_alignment: str = "left"
     abstract_max_chars: int = 300
 
 
@@ -110,16 +114,25 @@ def rules_to_export_style(rules: dict) -> ExportStyle:
     h2_ascii, h2_east = _fonts("heading2_font", "黑体")
     h3_ascii, h3_east = _fonts("heading3_font", "黑体")
     ref_ascii, ref_east = _fonts("ref_font", "宋体")
+    exact = 0
+    try:
+        if rules.get("line_spacing_pt"):
+            exact = int(float(rules["line_spacing_pt"]) * 20)
+    except (TypeError, ValueError):
+        exact = 0
     return ExportStyle(
         body_font_ascii=body_ascii, body_font_east=body_east, body_size=body_size,
-        line_spacing=line_sp, first_line_indent=indent,
+        line_spacing=line_sp, line_spacing_exact=exact, first_line_indent=indent,
         margin_top=m_top, margin_bottom=m_bottom, margin_left=m_left, margin_right=m_right,
         page_margin=m_top, body_alignment=alignment,
         heading1_font_ascii=h1_ascii, heading1_font_east=h1_east,
         heading2_font_ascii=h2_ascii, heading2_font_east=h2_east,
         heading3_font_ascii=h3_ascii, heading3_font_east=h3_east,
-        ref_font_ascii=ref_ascii, ref_font_east=ref_east,
+        heading1_size=_pt("heading1_size", 16), heading2_size=_pt("heading2_size", 14),
+        heading3_size=_pt("heading3_size", 12),
+        ref_font_ascii=ref_ascii, ref_font_east=ref_east, ref_size=_pt("ref_size", 10.5),
         page_header=rules.get("page_header", ""),
+        page_number_pos=rules.get("page_number_pos", "center") or "center",
     )
 
 
@@ -319,7 +332,9 @@ def _do_preserve_original_docx(original_data: bytes, result: dict, style: Export
     if body is None:
         raise ValueError("缺少 body 元素")
 
-    _apply_style_to_paragraphs(body, style)
+    style_names = _style_id_map(files.get("word/styles.xml", b""))
+    _apply_style_to_paragraphs(body, style, style_names)
+    _apply_section_margins(root, style)
     _replace_references_in_place(body, result, style)
 
     if "word/styles.xml" in files:
@@ -339,26 +354,203 @@ def _do_preserve_original_docx(original_data: bytes, result: dict, style: Export
     return output.getvalue()
 
 
-def _apply_style_to_paragraphs(body, style: ExportStyle) -> None:
-    """为每个段落添加首行缩进和行距样式。"""
+def _style_id_map(styles_xml: bytes) -> dict[str, str]:
+    """styleId -> 样式名，用于识别 Word 自带的 Heading 1/2/3。"""
+    try:
+        root = ElementTree.fromstring(styles_xml)
+    except Exception:
+        return {}
+    mapping: dict[str, str] = {}
+    for node in root.findall(f"{_W}style"):
+        style_id = node.get(f"{_W}styleId")
+        name_node = node.find(f"{_W}name")
+        if style_id and name_node is not None:
+            mapping[style_id] = name_node.get(f"{_W}val") or ""
+    return mapping
+
+
+_H1_PATTERN = re.compile(r"^(第[一二三四五六七八九十百]+[章节]|[一二三四五六七八九十]+、)")
+_H2_PATTERN = re.compile(r"^\d+\.\d+(?!\.)")
+_H3_PATTERN = re.compile(r"^(\d+\.\d+\.\d+|（[一二三四五六七八九十]+）)")
+_CAPTION_PATTERN = re.compile(r"^[图表]\s*\d")
+_SPECIAL_HEADINGS = {"摘要", "目录", "参考文献", "致谢", "附录", "abstract", "references", "contents"}
+
+
+def _classify_paragraph(text: str, style_name: str) -> str:
+    name = (style_name or "").strip().lower()
+    if name.startswith("heading 1") or name.startswith("标题 1") or name == "标题1":
+        return "heading1"
+    if name.startswith("heading 2") or name.startswith("标题 2") or name == "标题2":
+        return "heading2"
+    if name.startswith("heading 3") or name.startswith("标题 3") or name == "标题3":
+        return "heading3"
+    stripped = text.strip()
+    if not stripped:
+        return "empty"
+    if stripped.lower() in _SPECIAL_HEADINGS:
+        return "heading1"
+    if _H1_PATTERN.match(stripped):
+        return "heading1"
+    if _H3_PATTERN.match(stripped):
+        return "heading3"
+    if _H2_PATTERN.match(stripped):
+        return "heading2"
+    if _CAPTION_PATTERN.match(stripped):
+        return "caption"
+    return "body"
+
+
+def _sub(parent, tag: str):
+    node = parent.find(tag)
+    if node is None:
+        node = ElementTree.SubElement(parent, tag)
+    return node
+
+
+def _role_fonts(role: str, style: ExportStyle) -> tuple[str, str, int, bool]:
+    if role == "heading1":
+        return style.heading1_font_ascii, style.heading1_font_east, style.heading1_size, style.heading1_bold
+    if role == "heading2":
+        return style.heading2_font_ascii, style.heading2_font_east, style.heading2_size, style.heading2_bold
+    if role == "heading3":
+        return style.heading3_font_ascii, style.heading3_font_east, style.heading3_size, style.heading3_bold
+    if role == "reference":
+        return style.ref_font_ascii, style.ref_font_east, style.ref_size, False
+    return style.body_font_ascii, style.body_font_east, style.body_size, False
+
+
+def _apply_run_format(run, role: str, style: ExportStyle) -> None:
+    ascii_name, east_name, size, bold = _role_fonts(role, style)
+    rpr = run.find(f"{_W}rPr")
+    if rpr is None:
+        rpr = ElementTree.Element(f"{_W}rPr")
+        run.insert(0, rpr)
+    fonts = _sub(rpr, f"{_W}rFonts")
+    fonts.set(f"{_W}ascii", ascii_name)
+    fonts.set(f"{_W}hAnsi", ascii_name)
+    fonts.set(f"{_W}eastAsia", east_name)
+    for tag in ("sz", "szCs"):
+        node = _sub(rpr, f"{_W}{tag}")
+        node.set(f"{_W}val", str(size))
+    if bold:
+        node = _sub(rpr, f"{_W}b")
+        node.set(f"{_W}val", "1")
+    else:
+        existing = rpr.find(f"{_W}b")
+        if existing is not None:
+            rpr.remove(existing)
+
+
+def _apply_paragraph_format(p, role: str, style: ExportStyle) -> None:
+    ppr = p.find(f"{_W}pPr")
+    if ppr is None:
+        ppr = ElementTree.Element(f"{_W}pPr")
+        p.insert(0, ppr)
+
+    jc = _sub(ppr, f"{_W}jc")
+    if role == "heading1":
+        jc.set(f"{_W}val", "center")
+    elif role in ("heading2", "heading3"):
+        jc.set(f"{_W}val", "left")
+    elif role == "caption":
+        jc.set(f"{_W}val", "center")
+    else:
+        jc.set(f"{_W}val", style.body_alignment or "both")
+
+    spacing = _sub(ppr, f"{_W}spacing")
+    if style.line_spacing_exact:
+        spacing.set(f"{_W}line", str(style.line_spacing_exact))
+        spacing.set(f"{_W}lineRule", "exact")
+    else:
+        spacing.set(f"{_W}line", str(style.line_spacing))
+        spacing.set(f"{_W}lineRule", "auto")
+    if role in ("heading1", "heading2", "heading3"):
+        spacing.set(f"{_W}before", "240")
+        spacing.set(f"{_W}after", "120")
+
+    ind = _sub(ppr, f"{_W}ind")
+    if role == "reference":
+        ind.set(f"{_W}left", str(style.reference_hanging_indent))
+        ind.set(f"{_W}hanging", str(style.reference_hanging_indent))
+        ind.attrib.pop(f"{_W}firstLine", None)
+        ind.attrib.pop(f"{_W}firstLineChars", None)
+    elif role.startswith("heading") or role == "caption":
+        ind.set(f"{_W}firstLine", "0")
+        ind.set(f"{_W}firstLineChars", "0")
+    else:
+        ind.set(f"{_W}firstLine", str(style.first_line_indent))
+        ind.set(f"{_W}firstLineChars", "200" if style.first_line_indent else "0")
+
+    # 标题层级用大纲级别，导航窗格和自动目录才能识别
+    outline = ppr.find(f"{_W}outlineLvl")
+    if role in ("heading1", "heading2", "heading3"):
+        if outline is None:
+            outline = ElementTree.SubElement(ppr, f"{_W}outlineLvl")
+        outline.set(f"{_W}val", {"heading1": "0", "heading2": "1", "heading3": "2"}[role])
+    elif outline is not None:
+        ppr.remove(outline)
+
+
+def _apply_section_margins(root, style: ExportStyle) -> None:
+    for sect in root.iter(f"{_W}sectPr"):
+        pgsz = _sub(sect, f"{_W}pgSz")
+        pgsz.set(f"{_W}w", str(style.page_width))
+        pgsz.set(f"{_W}h", str(style.page_height))
+        pgmar = _sub(sect, f"{_W}pgMar")
+        pgmar.set(f"{_W}top", str(style.margin_top))
+        pgmar.set(f"{_W}bottom", str(style.margin_bottom))
+        pgmar.set(f"{_W}left", str(style.margin_left))
+        pgmar.set(f"{_W}right", str(style.margin_right))
+
+
+def _apply_style_to_paragraphs(body, style: ExportStyle, style_names: dict[str, str] | None = None) -> None:
+    """按规则重写每个段落的字体、字号、对齐、缩进、行距。表格内段落保持原样。"""
+    style_names = style_names or {}
+    table_paragraphs = {id(p) for table in body.iter(f"{_W}tbl") for p in table.iter(f"{_W}p")}
+    in_reference_section = False
+    # 封面区：从开头到第一个标题（或第一段长正文）之间的段落保持原样，
+    # 否则封面上的“硕士学位论文 / 作者 / 学号”会被套成宋体小四正文。
+    cover_mode = True
+    cover_skipped = 0
+    styled = 0
+
     for p in body.iter(f"{_W}p"):
-        pPr = p.find(f"{_W}pPr")
-        if pPr is None:
-            pPr = ElementTree.SubElement(p, f"{_W}pPr")
-            p.insert(0, pPr)
+        if id(p) in table_paragraphs:
+            continue
+        text = "".join(node.text or "" for node in p.iter(f"{_W}t")).strip()
+        ppr = p.find(f"{_W}pPr")
+        style_id = None
+        if ppr is not None:
+            pstyle = ppr.find(f"{_W}pStyle")
+            if pstyle is not None:
+                style_id = pstyle.get(f"{_W}val")
+        style_name = style_names.get(style_id, "") if style_id else ""
 
-        spacing = pPr.find(f"{_W}spacing")
-        if spacing is None:
-            spacing = ElementTree.SubElement(pPr, f"{_W}spacing")
-        if spacing.get(f"{_W}line") is None:
-            spacing.set(f"{_W}line", str(style.line_spacing))
-            spacing.set(f"{_W}lineRule", "auto")
+        role = _classify_paragraph(text, style_name)
+        if role == "empty":
+            continue
+        if cover_mode:
+            if role.startswith("heading") or len(text) > 80:
+                cover_mode = False
+            else:
+                cover_skipped += 1
+                continue
+        if role == "heading1" and text.strip() in ("参考文献", "References", "references"):
+            in_reference_section = True
+            role = "heading1"
+        elif role == "heading1" and in_reference_section:
+            in_reference_section = False
+        elif in_reference_section:
+            role = "reference"
 
-        ind = pPr.find(f"{_W}ind")
-        if ind is None:
-            ind = ElementTree.SubElement(pPr, f"{_W}ind")
-        if ind.get(f"{_W}firstLine") is None:
-            ind.set(f"{_W}firstLine", str(style.first_line_indent))
+        _apply_paragraph_format(p, role, style)
+        for run in p.iter(f"{_W}r"):
+            if not "".join(node.text or "" for node in run.iter(f"{_W}t")).strip():
+                continue
+            _apply_run_format(run, role, style)
+        styled += 1
+
+    return {"cover_skipped": cover_skipped, "styled": styled}
 
 
 def _replace_references_in_place(body, result: dict, style: ExportStyle) -> None:
@@ -429,25 +621,110 @@ def _add_run_to_paragraph(p, text: str, kind: str, style: ExportStyle) -> None:
     p.append(run_elem)
 
 
+_STYLE_NAME_ROLES = {
+    "normal": "body",
+    "正文": "body",
+    "heading 1": "heading1",
+    "标题 1": "heading1",
+    "标题1": "heading1",
+    "heading 2": "heading2",
+    "标题 2": "heading2",
+    "标题2": "heading2",
+    "heading 3": "heading3",
+    "标题 3": "heading3",
+    "标题3": "heading3",
+}
+
+
+def _write_rpr(parent, ascii_name: str, east_name: str, size: int, bold: bool) -> None:
+    rpr = parent.find(f"{_W}rPr")
+    if rpr is None:
+        rpr = ElementTree.SubElement(parent, f"{_W}rPr")
+    fonts = _sub(rpr, f"{_W}rFonts")
+    fonts.set(f"{_W}ascii", ascii_name)
+    fonts.set(f"{_W}hAnsi", ascii_name)
+    fonts.set(f"{_W}eastAsia", east_name)
+    for tag in ("sz", "szCs"):
+        node = _sub(rpr, f"{_W}{tag}")
+        node.set(f"{_W}val", str(size))
+    if bold:
+        node = _sub(rpr, f"{_W}b")
+        node.set(f"{_W}val", "1")
+    else:
+        existing = rpr.find(f"{_W}b")
+        if existing is not None:
+            rpr.remove(existing)
+
+
+def _write_ppr(parent, style: ExportStyle, role: str) -> None:
+    ppr = parent.find(f"{_W}pPr")
+    if ppr is None:
+        ppr = ElementTree.SubElement(parent, f"{_W}pPr")
+    spacing = _sub(ppr, f"{_W}spacing")
+    if style.line_spacing_exact:
+        spacing.set(f"{_W}line", str(style.line_spacing_exact))
+        spacing.set(f"{_W}lineRule", "exact")
+    else:
+        spacing.set(f"{_W}line", str(style.line_spacing))
+        spacing.set(f"{_W}lineRule", "auto")
+    ind = _sub(ppr, f"{_W}ind")
+    if role == "body":
+        ind.set(f"{_W}firstLine", str(style.first_line_indent))
+        ind.set(f"{_W}firstLineChars", "200" if style.first_line_indent else "0")
+    else:
+        ind.set(f"{_W}firstLine", "0")
+        ind.set(f"{_W}firstLineChars", "0")
+    if role in ("heading1", "heading2", "heading3"):
+        jc = _sub(ppr, f"{_W}jc")
+        jc.set(f"{_W}val", "center" if role == "heading1" else "left")
+        spacing.set(f"{_W}before", "240")
+        spacing.set(f"{_W}after", "120")
+
+
 def _merge_styles_xml(original_xml: bytes, style: ExportStyle) -> str:
-    """在原 styles.xml 基础上注入默认行距。"""
+    """把规则写进 styles.xml：文档默认、Normal、Heading 1-3 一起改，
+    这样用户接着打字、自动目录、导航窗格都会沿用新格式。"""
     try:
         root = ElementTree.fromstring(original_xml)
-        doc_defaults = root.find(f"{_W}docDefaults")
-        if doc_defaults is not None:
-            rpr_default = doc_defaults.find(f"{_W}rPrDefault")
-            if rpr_default is not None:
-                rpr = rpr_default.find(f"{_W}rPr")
-                if rpr is not None:
-                    spacing = rpr.find(f"{_W}spacing")
-                    if spacing is None:
-                        spacing = ElementTree.SubElement(rpr, f"{_W}spacing")
-                    if spacing.get(f"{_W}line") is None:
-                        spacing.set(f"{_W}line", str(style.line_spacing))
-                        spacing.set(f"{_W}lineRule", "auto")
-        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + ElementTree.tostring(root, encoding="unicode")
     except ElementTree.ParseError:
         return _styles_xml(style)
+
+    # 1) 文档默认字体与行距
+    doc_defaults = root.find(f"{_W}docDefaults")
+    if doc_defaults is not None:
+        rpr_default = doc_defaults.find(f"{_W}rPrDefault")
+        if rpr_default is None:
+            rpr_default = ElementTree.SubElement(doc_defaults, f"{_W}rPrDefault")
+        rpr = rpr_default.find(f"{_W}rPr")
+        if rpr is None:
+            rpr = ElementTree.SubElement(rpr_default, f"{_W}rPr")
+        fonts = _sub(rpr, f"{_W}rFonts")
+        fonts.set(f"{_W}ascii", style.body_font_ascii)
+        fonts.set(f"{_W}hAnsi", style.body_font_ascii)
+        fonts.set(f"{_W}eastAsia", style.body_font_east)
+        for tag in ("sz", "szCs"):
+            node = _sub(rpr, f"{_W}{tag}")
+            node.set(f"{_W}val", str(style.body_size))
+
+    # 2) 具名样式
+    for node in root.findall(f"{_W}style"):
+        name_node = node.find(f"{_W}name")
+        if name_node is None:
+            continue
+        role = _STYLE_NAME_ROLES.get((name_node.get(f"{_W}val") or "").strip().lower())
+        if not role:
+            continue
+        if role == "body":
+            _write_rpr(node, style.body_font_ascii, style.body_font_east, style.body_size, False)
+        elif role == "heading1":
+            _write_rpr(node, style.heading1_font_ascii, style.heading1_font_east, style.heading1_size, style.heading1_bold)
+        elif role == "heading2":
+            _write_rpr(node, style.heading2_font_ascii, style.heading2_font_east, style.heading2_size, style.heading2_bold)
+        else:
+            _write_rpr(node, style.heading3_font_ascii, style.heading3_font_east, style.heading3_size, style.heading3_bold)
+        _write_ppr(node, style, role)
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + ElementTree.tostring(root, encoding="unicode")
 
 
 def download_name(title: str, extension: str) -> str:

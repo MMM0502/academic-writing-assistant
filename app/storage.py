@@ -97,6 +97,33 @@ class Store:
             created_at TEXT NOT NULL,
             UNIQUE(degree, school, college, url)
         );
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS template_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            degree TEXT NOT NULL,
+            school TEXT NOT NULL COLLATE NOCASE,
+            college TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+            template_id INTEGER,
+            rules TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'docx',
+            verified INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS search_cache (
+            cache_key TEXT PRIMARY KEY,
+            degree TEXT NOT NULL,
+            school TEXT NOT NULL,
+            college TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
         """
 
     def connect(self) -> sqlite3.Connection:
@@ -332,6 +359,122 @@ class Store:
                     (item["degree"], item["school"].strip(), item.get("college", "").strip(), item["url"]),
                 ).fetchone()
                 return int(row["id"])
+
+    def get_setting(self, key: str) -> str | None:
+        with closing(self.connect()) as connection:
+            row = connection.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with closing(self.connect()) as connection:
+            with connection:
+                connection.execute(
+                    "INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key, value, updated_at),
+                )
+
+    def get_search_cache(self, cache_key: str) -> dict[str, Any] | None:
+        """返回未过期的查询缓存；负向结果（status='empty'）同样算命中。"""
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                "SELECT status, payload, expires_at FROM search_cache WHERE cache_key = ?", (cache_key,)
+            ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] <= datetime.now(timezone.utc).isoformat():
+            return None
+        return {"status": row["status"], "payload": json.loads(row["payload"]), "expires_at": row["expires_at"]}
+
+    def put_search_cache(
+        self,
+        cache_key: str,
+        degree: str,
+        school: str,
+        college: str,
+        status: str,
+        payload: Any,
+        ttl_seconds: int,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat()
+        with closing(self.connect()) as connection:
+            with connection:
+                connection.execute(
+                    "INSERT INTO search_cache(cache_key, degree, school, college, status, payload, created_at, expires_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(cache_key) DO UPDATE SET status = excluded.status, payload = excluded.payload, "
+                    "created_at = excluded.created_at, expires_at = excluded.expires_at",
+                    (cache_key, degree, school, college, status, json.dumps(payload, ensure_ascii=False), now.isoformat(), expires_at),
+                )
+
+    def save_template_rules(
+        self,
+        degree: str,
+        school: str,
+        college: str,
+        rules: dict,
+        template_id: int | None = None,
+        confidence: float = 0.0,
+        source: str = "docx",
+        verified: bool = True,
+    ) -> dict:
+        """同一（学历, 学校, 学院）只保留最新一份规则，重复保存即覆盖。"""
+        created_at = datetime.now(timezone.utc).isoformat()
+        payload = json.dumps(rules, ensure_ascii=False)
+        with closing(self.connect()) as connection:
+            with connection:
+                row = connection.execute(
+                    "SELECT id FROM template_rules WHERE degree = ? AND school = ? AND college = ? ORDER BY id DESC LIMIT 1",
+                    (degree, school.strip(), college.strip()),
+                ).fetchone()
+                if row:
+                    rule_id = int(row["id"])
+                    connection.execute(
+                        "UPDATE template_rules SET template_id = ?, rules = ?, confidence = ?, source = ?, verified = ?, created_at = ? WHERE id = ?",
+                        (template_id, payload, confidence, source, 1 if verified else 0, created_at, rule_id),
+                    )
+                else:
+                    cursor = connection.execute(
+                        "INSERT INTO template_rules(degree, school, college, template_id, rules, confidence, source, verified, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (degree, school.strip(), college.strip(), template_id, payload, confidence, source, 1 if verified else 0, created_at),
+                    )
+                    rule_id = int(cursor.lastrowid)
+        return {
+            "id": rule_id,
+            "degree": degree,
+            "school": school.strip(),
+            "college": college.strip(),
+            "rules": rules,
+            "confidence": confidence,
+            "source": source,
+            "verified": bool(verified),
+            "created_at": created_at,
+        }
+
+    def get_template_rules(self, degree: str, school: str, college: str = "") -> dict | None:
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM template_rules WHERE degree = ? AND school = ? AND (college = ? OR college = '') "
+                "ORDER BY CASE WHEN college = ? THEN 0 ELSE 1 END, id DESC LIMIT 1",
+                (degree, school.strip(), college.strip(), college.strip()),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "degree": row["degree"],
+            "school": row["school"],
+            "college": row["college"],
+            "template_id": row["template_id"],
+            "rules": json.loads(row["rules"]),
+            "confidence": row["confidence"],
+            "source": row["source"],
+            "verified": bool(row["verified"]),
+            "created_at": row["created_at"],
+        }
 
     def delete_journal_style(self, style_id: int) -> bool:
         with closing(self.connect()) as connection:
