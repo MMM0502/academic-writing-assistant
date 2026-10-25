@@ -97,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_payload(HTTPStatus.OK, get_llm_status())
         elif parsed.path == "/api/templates/rules":
             query = parse_qs(parsed.query)
-            rules = store.get_template_rules(
+            rules = store.find_template_rules(
                 query.get("degree", [""])[0],
                 query.get("school", [""])[0],
                 query.get("college", [""])[0],
@@ -597,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
         school_degree = fields.get("school_degree", "")
         school_name = fields.get("school_name", "")
         if school_degree and school_name:
-            saved_rules = store.get_template_rules(school_degree, school_name, fields.get("school_college", ""))
+            saved_rules = store.find_template_rules(school_degree, school_name, fields.get("school_college", ""))
             if saved_rules:
                 result["school_rules"] = saved_rules["rules"]
                 result["school_template"] = {

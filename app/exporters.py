@@ -12,11 +12,15 @@ import re
 
 
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 _W = f"{{{_W_NS}}}"
 
 _REFERENCE_HEADINGS = {"参考文献", "references", "bibliography", "references:"}
 
 ElementTree.register_namespace("w", _W_NS)
+ElementTree.register_namespace("r", _R_NS)
 
 
 @dataclass
@@ -63,6 +67,7 @@ class ExportStyle:
     paragraph_space_after: int = 0
     page_header: str = ""
     page_number_pos: str = "center"
+    page_number: bool = True
     line_spacing_exact: int = 0
     heading1_alignment: str = "center"
     heading2_alignment: str = "left"
@@ -186,6 +191,7 @@ def rules_to_export_style(rules: dict) -> ExportStyle:
         ref_font_ascii=ref_ascii, ref_font_east=ref_east, ref_size=_pt("ref_size", 10.5),
         page_header=rules.get("page_header", ""),
         page_number_pos=rules.get("page_number_pos", "center") or "center",
+        page_number=bool(rules.get("page_number", True)),
     )
 
 
@@ -394,6 +400,7 @@ def _do_preserve_original_docx(original_data: bytes, result: dict, style: Export
     style_names = _style_id_map(files.get("word/styles.xml", b""))
     _apply_style_to_paragraphs(body, style, style_names)
     _apply_section_margins(root, style)
+    _apply_header_footer(files, root, style)
     _replace_references_in_place(body, result, style)
 
     if "word/styles.xml" in files:
@@ -560,6 +567,98 @@ def _apply_paragraph_format(p, role: str, style: ExportStyle) -> None:
         outline.set(f"{_W}val", {"heading1": "0", "heading2": "1", "heading3": "2"}[role])
     elif outline is not None:
         ppr.remove(outline)
+
+
+def _header_xml(style: ExportStyle) -> str:
+    return (
+        f'<w:hdr xmlns:w="{_W_NS}"><w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+        f'<w:r><w:rPr><w:rFonts w:eastAsia="{style.body_font_east}"/><w:sz w:val="{style.ref_size}"/></w:rPr>'
+        f'<w:t xml:space="preserve">{escape(style.page_header)}</w:t></w:r></w:p></w:hdr>'
+    )
+
+
+def _footer_xml(style: ExportStyle) -> str:
+    position = style.page_number_pos or "center"
+    return (
+        f'<w:ftr xmlns:w="{_W_NS}"><w:p><w:pPr><w:jc w:val="{position}"/></w:pPr>'
+        '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        '<w:r><w:instrText xml:space="preserve">PAGE</w:instrText></w:r>'
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>'
+    )
+
+
+def _add_relationships(files: dict, entries: list) -> None:
+    name = "word/_rels/document.xml.rels"
+    xml = files.get(name)
+    if not xml:
+        return
+    root = ElementTree.fromstring(xml)
+    existing = {node.get("Id") for node in root}
+    for rel_id, rel_type, target in entries:
+        if rel_id in existing:
+            continue
+        node = ElementTree.SubElement(root, f"{{{_PKG_REL_NS}}}Relationship")
+        node.set("Id", rel_id)
+        node.set("Type", f"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{rel_type}")
+        node.set("Target", target)
+    files[name] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        + ElementTree.tostring(root, encoding="unicode")
+    ).encode("utf-8")
+
+
+def _add_content_types(files: dict, parts: list) -> None:
+    name = "[Content_Types].xml"
+    xml = files.get(name)
+    if not xml:
+        return
+    root = ElementTree.fromstring(xml)
+    existing = {node.get("PartName") for node in root}
+    for part_name, content_type in parts:
+        if part_name in existing:
+            continue
+        node = ElementTree.SubElement(root, f"{{{_CT_NS}}}Override")
+        node.set("PartName", part_name)
+        node.set("ContentType", content_type)
+    files[name] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        + ElementTree.tostring(root, encoding="unicode")
+    ).encode("utf-8")
+
+
+def _apply_header_footer(files: dict, root, style: ExportStyle) -> None:
+    """在原稿里补页眉与页码；已有同类型引用时以本次规则为准。"""
+    sections = list(root.iter(f"{_W}sectPr"))
+    if not sections:
+        return
+    rels: list = []
+    overrides: list = []
+    if style.page_header:
+        files["word/dshHeader.xml"] = _header_xml(style).encode("utf-8")
+        rels.append(("rIdDshHeader", "header", "dshHeader.xml"))
+        overrides.append(("/word/dshHeader.xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"))
+    if style.page_number:
+        files["word/dshFooter.xml"] = _footer_xml(style).encode("utf-8")
+        rels.append(("rIdDshFooter", "footer", "dshFooter.xml"))
+        overrides.append(("/word/dshFooter.xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"))
+    if not rels:
+        return
+    try:
+        _add_relationships(files, rels)
+        _add_content_types(files, overrides)
+    except Exception:
+        return
+    for section in sections:
+        for tag in (f"{_W}headerReference", f"{_W}footerReference"):
+            for existing in list(section.findall(tag)):
+                if existing.get(f"{_W}type") in (None, "default"):
+                    section.remove(existing)
+        for rel_id, rel_type, _target in reversed(rels):
+            tag = f"{_W}headerReference" if rel_type == "header" else f"{_W}footerReference"
+            node = ElementTree.Element(tag)
+            node.set(f"{_W}type", "default")
+            node.set(f"{{{_R_NS}}}id", rel_id)
+            section.insert(0, node)
 
 
 def _apply_section_margins(root, style: ExportStyle) -> None:

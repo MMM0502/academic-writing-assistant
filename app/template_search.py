@@ -74,6 +74,31 @@ def _tavily_search(api_key: str, school: str, college: str, degree_label: str) -
         raise ValueError(f"联网搜索失败：{exc}") from exc
 
 
+DEGREE_HINTS = {
+    "undergraduate": {"positive": ("本科", "学士", "毕业设计"), "negative": ("硕士", "博士", "专业学位")},
+    "associate": {"positive": ("专科", "高职", "毕业设计"), "negative": ("硕士", "博士", "本科", "学士")},
+    "graduate": {"positive": ("硕士", "研究生", "专业学位"), "negative": ("本科", "学士")},
+    "doctoral": {"positive": ("博士",), "negative": ("本科", "学士", "硕士")},
+}
+
+TEMPLATE_KEYWORDS = ("模板", "规范", "格式", "论文", "学位", "毕业", "撰写", "排版")
+
+
+def _degree_ok(item: dict) -> bool:
+    """标题/摘要里明确写了别的学历层次时丢弃，避免“选本科返回硕士模板”。"""
+    hints = DEGREE_HINTS.get(item.get("degree", ""), {})
+    text = f"{item.get('title', '')} {item.get('snippet', '')}"
+    has_negative = any(word in text for word in hints.get("negative", ()))
+    has_positive = any(word in text for word in hints.get("positive", ()))
+    return not has_negative or has_positive
+
+
+def _looks_relevant(item: dict) -> bool:
+    """标题里完全没有模板相关词的多半是噪音（如“教师名录”）。"""
+    title = item.get("title", "")
+    return any(word in title for word in TEMPLATE_KEYWORDS)
+
+
 def _rank(candidates: list[dict]) -> list[dict]:
     """官方域名优先，其次标题里带“模板 / 格式 / 学位论文”的；同一域名只留最相关的一条。"""
     for item in candidates:
@@ -91,6 +116,7 @@ def _rank(candidates: list[dict]) -> list[dict]:
             score += 1
         item["relevance"] = score
         item["confidence"] = "high" if score >= 4 else ("medium" if score >= 2 else "low")
+    candidates = [item for item in candidates if _degree_ok(item) and _looks_relevant(item)]
     candidates.sort(key=lambda row: row["relevance"], reverse=True)
     picked: list[dict] = []
     seen: set[str] = set()
@@ -100,6 +126,10 @@ def _rank(candidates: list[dict]) -> list[dict]:
             continue
         seen.add(domain)
         picked.append(item)
+    # 已经有官方域名结果时，非教育机构域名只作兜底，不再混排
+    official = [item for item in picked if item.get("official_domain_hint")]
+    if official:
+        return official
     return picked
 
 
@@ -117,7 +147,7 @@ def search_templates(store: Store, degree: str, school: str, college: str = "", 
 
     # 第一层：本地模板库。搜过、或人工确认过的候选直接命中，不再联网。
     if not refresh:
-        library = store.list_school_templates(degree, school, college)
+        library = store.find_school_templates(degree, school, college)
         if library:
             return {
                 "cached": True,

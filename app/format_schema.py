@@ -42,7 +42,7 @@ DEFAULTS: dict[str, Any] = {
         "table": {"position": "above", "size": "10.5pt", "align": "center"},
     },
     "references": {"font_cn": "SimSun", "size": "10.5pt", "hanging_indent": 2, "numbering": "bracket"},
-    "header_footer": {"header_text": "", "page_number": {"position": "center", "format": "arabic", "start": 1}},
+    "header_footer": {"header_text": "", "page_number": {"enabled": True, "position": "center", "format": "arabic", "start": 1}},
 }
 
 # v1 扁平键 -> v2 路径
@@ -65,6 +65,7 @@ FLAT_TO_PATH: dict[str, tuple[str, ...]] = {
     "ref_size": ("references", "size"),
     "page_header": ("header_footer", "header_text"),
     "page_number_pos": ("header_footer", "page_number", "position"),
+    "page_number": ("header_footer", "page_number", "enabled"),
     "figure_caption": ("captions", "figure", "position"),
 }
 
@@ -105,6 +106,8 @@ def to_v2(rules: dict | None) -> dict[str, Any]:
         tree["body"]["line_spacing"] = {"type": "exact", "value": str(rules["line_spacing_pt"])}
     elif rules.get("line_spacing"):
         tree["body"]["line_spacing"] = {"type": "multiple", "value": str(rules["line_spacing"])}
+    if "page_number" in rules:
+        _set(tree, ("header_footer", "page_number", "enabled"), _as_bool(rules["page_number"]))
     if rules.get("first_line_indent") is not None:
         chars = 2 if str(rules["first_line_indent"]) == "2chars" else 0
         tree["body"]["first_line_indent"] = {"chars": chars}
@@ -122,6 +125,9 @@ def to_v2(rules: dict | None) -> dict[str, Any]:
     for group in ("figure", "table"):
         tree["captions"].setdefault(group, {})
     tree["references"]["hanging_indent"] = int(float(tree["references"].get("hanging_indent", 2) or 0))
+    tree["header_footer"].setdefault("page_number", {})["enabled"] = _as_bool(
+        tree["header_footer"].get("page_number", {}).get("enabled", True)
+    )
     tree["body"]["first_line_indent"]["chars"] = int(float(tree["body"]["first_line_indent"].get("chars", 2) or 0))
     return tree
 
@@ -168,6 +174,7 @@ def to_flat(rules: dict | None) -> dict[str, Any]:
         "ref_hanging_chars": int(references.get("hanging_indent", 2) or 0),
         "page_header": header.get("header_text", ""),
         "page_number_pos": header.get("page_number", {}).get("position", "center"),
+        "page_number": _as_bool(header.get("page_number", {}).get("enabled", True)),
         "figure_caption": captions.get("figure", {}).get("position", "below"),
         "caption_size": str(captions.get("figure", {}).get("size", "10.5pt")),
         "caption_align": captions.get("figure", {}).get("align", "center"),

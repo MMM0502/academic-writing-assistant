@@ -225,7 +225,7 @@ def get_style(store: Store, style_id: int) -> dict | None:
     style["overrides_count"] = count_overrides(overrides)
     style["base_missing"] = False
     if base and base.get("school") and overrides is not None:
-        saved = store.get_template_rules(base.get("degree", ""), base["school"], base.get("college", ""))
+        saved = store.find_template_rules(base.get("degree", ""), base["school"], base.get("college", ""))
         if saved:
             style["rules"] = merge_rules(saved["rules"], overrides)
         else:

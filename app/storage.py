@@ -6,6 +6,45 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any
+import re
+
+
+SCHOOL_ALIASES = {
+    "北大": "北京大学",
+    "清华": "清华大学",
+    "北交大": "北京交通大学",
+    "北京交大": "北京交通大学",
+    "上交": "上海交通大学",
+    "上海交大": "上海交通大学",
+    "浙大": "浙江大学",
+    "南大": "南京大学",
+    "中科大": "中国科学技术大学",
+    "武大": "武汉大学",
+    "华科": "华中科技大学",
+    "西交": "西安交通大学",
+    "哈工大": "哈尔滨工业大学",
+    "南开": "南开大学",
+    "天大": "天津大学",
+    "北师": "北京师范大学",
+    "人大": "中国人民大学",
+    "复旦": "复旦大学",
+    "中山": "中山大学",
+    "同济": "同济大学",
+}
+
+SCHOOL_SUFFIXES = ("职业技术学院", "职业学院", "高等专科学校", "大学", "学院", "学校")
+
+
+def _normalize_school(name: str) -> str:
+    """校名归一化：去标点 → 展开常见简称 → 剥离“大学/学院”等后缀。"""
+    text = re.sub(r"[\s·•\-_/（）()]+", "", str(name or "").lower())
+    if not text:
+        return ""
+    text = SCHOOL_ALIASES.get(text, text)
+    for suffix in SCHOOL_SUFFIXES:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return text[: -len(suffix)]
+    return text
 
 
 class Store:
@@ -530,6 +569,46 @@ class Store:
             "verified": bool(row["verified"]),
             "created_at": row["created_at"],
         }
+
+    def _similar_school(self, rows: list, school: str):
+        target = _normalize_school(school)
+        if not target:
+            return None
+        for row in rows:
+            candidate = _normalize_school(row["school"])
+            if not candidate:
+                continue
+            if candidate == target:
+                return row
+            if len(target) >= 4 and (target in candidate or candidate in target):
+                return row
+        return None
+
+    def find_template_rules(self, degree: str, school: str, college: str = "") -> dict | None:
+        exact = self.get_template_rules(degree, school, college)
+        if exact:
+            return exact
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                "SELECT * FROM template_rules WHERE degree = ? ORDER BY id DESC", (degree,)
+            ).fetchall()
+        matched = self._similar_school(rows, school)
+        if not matched:
+            return None
+        return self.get_template_rules(matched["degree"], matched["school"], matched["college"])
+
+    def find_school_templates(self, degree: str, school: str, college: str = "") -> list[dict]:
+        exact = self.list_school_templates(degree, school, college)
+        if exact:
+            return exact
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                "SELECT * FROM school_templates WHERE degree = ? ORDER BY id DESC", (degree,)
+            ).fetchall()
+        matched = self._similar_school(rows, school)
+        if not matched:
+            return []
+        return self.list_school_templates(matched["degree"], matched["school"], matched["college"])
 
     def delete_journal_style(self, style_id: int) -> bool:
         with closing(self.connect()) as connection:
