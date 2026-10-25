@@ -174,150 +174,316 @@
         <form id="journal-style-form" class="journal-style-form">
           <div class="form-row">
             <label class="field"><span>格式名称</span>
-              <input type="text" name="name" required placeholder="例如：My Journal Style">
+              <input type="text" name="name" required placeholder="例如：本校学位论文（研究生）">
             </label>
-            <label class="field"><span>出版机构</span>
+            <label class="field"><span>说明 / 出版机构</span>
               <input type="text" name="publisher" placeholder="可选">
             </label>
           </div>
-          <p class="meta-label">参考文献规则</p>
-          <div class="form-row">
-            <label class="field"><span>作者格式</span>
-              <select name="author_format">
-                <option value="surname_initial">姓+首字母</option>
-                <option value="initial_surname">首字母+姓</option>
-                <option value="surname_firstname">姓+名</option>
-              </select>
-            </label>
-            <label class="field"><span>et al 阈值</span>
-              <input type="number" name="max_authors_et_al" value="5" min="1" max="20">
-            </label>
-            <label class="field"><span>年份格式</span>
-              <select name="year_format">
-                <option value="no_parentheses">无括号</option>
-                <option value="parentheses">括号包裹</option>
-              </select>
-            </label>
-            <label class="field"><span>标题大小写</span>
-              <select name="title_case">
-                <option value="sentence">句首大写</option>
-                <option value="title">标题大写</option>
-              </select>
-            </label>
+
+          <div class="base-picker">
+            <p class="meta-label">从学校模板新建（先继承，再微调）</p>
+            <div class="form-row">
+              <label class="field"><span>学历</span>
+                <select id="base-degree">
+                  <option value="associate">专科</option>
+                  <option value="undergraduate">本科</option>
+                  <option value="graduate" selected>研究生</option>
+                  <option value="doctoral">博士生</option>
+                </select>
+              </label>
+              <label class="field"><span>学校</span><input type="text" id="base-school" placeholder="如 北京交通大学"></label>
+              <label class="field"><span>学院</span><input type="text" id="base-college" placeholder="可选"></label>
+              <button class="small-button" id="load-base-template" type="button">载入学校模板</button>
+              <button class="small-button" id="reset-base-template" type="button" hidden>恢复基底</button>
+            </div>
+            <p class="meta-label" id="base-status"></p>
           </div>
-          <div class="form-row">
-            <label class="field"><span>引用标注方式</span>
-              <select name="citation_style">
-                <option value="superscript">上标数字</option>
-                <option value="bracket">括号数字 [1]</option>
-                <option value="author_year">作者-年份</option>
-              </select>
-            </label>
-            <label class="field"><span>参考文献排序</span>
-              <select name="sort_order">
-                <option value="citation_order">按引用顺序</option>
-                <option value="alphabetical">按字母顺序</option>
-              </select>
-            </label>
+
+          <div class="style-editor">
+            <div class="style-form-groups">
+              <details class="style-group" open>
+                <summary>页面</summary>
+                <div class="form-row">
+                  <label class="field"><span>上边距 (cm)</span><input type="number" name="page.margins.top" value="2.54" step="0.1" min="0"></label>
+                  <label class="field"><span>下边距 (cm)</span><input type="number" name="page.margins.bottom" value="2.54" step="0.1" min="0"></label>
+                  <label class="field"><span>左边距 (cm)</span><input type="number" name="page.margins.left" value="3.18" step="0.1" min="0"></label>
+                  <label class="field"><span>右边距 (cm)</span><input type="number" name="page.margins.right" value="3.18" step="0.1" min="0"></label>
+                </div>
+              </details>
+
+              <details class="style-group" open>
+                <summary>正文</summary>
+                <div class="form-row">
+                  <label class="field"><span>中文字体</span><select name="body.font_cn"><option value="SimSun">宋体</option>
+<option value="SimHei">黑体</option>
+<option value="KaiTi">楷体</option>
+<option value="FangSong">仿宋</option></select></label>
+                  <label class="field"><span>西文字体</span>
+                    <select name="body.font_en">
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Calibri">Calibri</option>
+                      <option value="Arial">Arial</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>字号</span><select name="body.size"><option value="22pt" selected>二号 22pt</option>
+<option value="18pt">小二 18pt</option>
+<option value="16pt">三号 16pt</option>
+<option value="15pt">小三 15pt</option>
+<option value="14pt">四号 14pt</option>
+<option value="12pt">小四 12pt</option>
+<option value="10.5pt">五号 10.5pt</option>
+<option value="9pt">小五 9pt</option></select></label>
+                </div>
+                <div class="form-row">
+                  <label class="field"><span>行距类型</span>
+                    <select name="body.line_spacing.type">
+                      <option value="multiple">倍数</option>
+                      <option value="exact">固定值 (pt)</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>行距值</span><input type="number" name="body.line_spacing.value" value="1.5" step="0.1" min="0.8"></label>
+                  <label class="field"><span>首行缩进 (字符)</span><input type="number" name="body.first_line_indent.chars" value="2" step="1" min="0" max="6"></label>
+                </div>
+                <div class="form-row">
+                  <label class="field"><span>对齐</span>
+                    <select name="body.alignment">
+                      <option value="both">两端对齐</option>
+                      <option value="left">左对齐</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>段前 (pt)</span><input type="number" name="body.space_before" value="0" step="0.5" min="0"></label>
+                  <label class="field"><span>段后 (pt)</span><input type="number" name="body.space_after" value="0" step="0.5" min="0"></label>
+                </div>
+              </details>
+
+              <details class="style-group">
+                <summary>标题层级</summary>
+        <div class="form-row style-subgroup">
+          <label class="field"><span>一级标题字体</span>
+            <select name="headings.1.font_cn"><option value="SimSun">宋体</option>
+<option value="SimHei">黑体</option>
+<option value="KaiTi">楷体</option>
+<option value="FangSong">仿宋</option></select>
+          </label>
+          <label class="field"><span>一级标题字号</span>
+            <select name="headings.1.size">
+              <option value="22pt" selected>二号 22pt</option>
+              <option value="18pt">小二 18pt</option>
+              <option value="16pt">三号 16pt</option>
+              <option value="15pt">小三 15pt</option>
+              <option value="14pt">四号 14pt</option>
+              <option value="12pt">小四 12pt</option>
+            </select>
+          </label>
+          <label class="field"><span>对齐</span>
+            <select name="headings.1.align">
+              <option value="center" selected>居中</option>
+              <option value="left">左对齐</option>
+            </select>
+          </label>
+          <label class="field"><span>加粗</span>
+            <input type="checkbox" name="headings.1.bold" value="1" checked>
+          </label>
+          <label class="field"><span>段前 (pt)</span>
+            <input type="number" name="headings.1.before" value="12" step="0.5" min="0">
+          </label>
+          <label class="field"><span>段后 (pt)</span>
+            <input type="number" name="headings.1.after" value="6" step="0.5" min="0">
+          </label>
+        </div>
+        <div class="form-row style-subgroup">
+          <label class="field"><span>二级标题字体</span>
+            <select name="headings.2.font_cn"><option value="SimSun">宋体</option>
+<option value="SimHei">黑体</option>
+<option value="KaiTi">楷体</option>
+<option value="FangSong">仿宋</option></select>
+          </label>
+          <label class="field"><span>二级标题字号</span>
+            <select name="headings.2.size">
+              <option value="22pt">二号 22pt</option>
+              <option value="18pt">小二 18pt</option>
+              <option value="16pt" selected>三号 16pt</option>
+              <option value="15pt">小三 15pt</option>
+              <option value="14pt">四号 14pt</option>
+              <option value="12pt">小四 12pt</option>
+            </select>
+          </label>
+          <label class="field"><span>对齐</span>
+            <select name="headings.2.align">
+              <option value="center">居中</option>
+              <option value="left" selected>左对齐</option>
+            </select>
+          </label>
+          <label class="field"><span>加粗</span>
+            <input type="checkbox" name="headings.2.bold" value="1" checked>
+          </label>
+          <label class="field"><span>段前 (pt)</span>
+            <input type="number" name="headings.2.before" value="12" step="0.5" min="0">
+          </label>
+          <label class="field"><span>段后 (pt)</span>
+            <input type="number" name="headings.2.after" value="6" step="0.5" min="0">
+          </label>
+        </div>
+        <div class="form-row style-subgroup">
+          <label class="field"><span>三级标题字体</span>
+            <select name="headings.3.font_cn"><option value="SimSun">宋体</option>
+<option value="SimHei">黑体</option>
+<option value="KaiTi">楷体</option>
+<option value="FangSong">仿宋</option></select>
+          </label>
+          <label class="field"><span>三级标题字号</span>
+            <select name="headings.3.size">
+              <option value="22pt">二号 22pt</option>
+              <option value="18pt">小二 18pt</option>
+              <option value="16pt" selected>三号 16pt</option>
+              <option value="15pt">小三 15pt</option>
+              <option value="14pt">四号 14pt</option>
+              <option value="12pt">小四 12pt</option>
+            </select>
+          </label>
+          <label class="field"><span>对齐</span>
+            <select name="headings.3.align">
+              <option value="center">居中</option>
+              <option value="left" selected>左对齐</option>
+            </select>
+          </label>
+          <label class="field"><span>加粗</span>
+            <input type="checkbox" name="headings.3.bold" value="1" checked>
+          </label>
+          <label class="field"><span>段前 (pt)</span>
+            <input type="number" name="headings.3.before" value="12" step="0.5" min="0">
+          </label>
+          <label class="field"><span>段后 (pt)</span>
+            <input type="number" name="headings.3.after" value="6" step="0.5" min="0">
+          </label>
+        </div>
+              </details>
+
+              <details class="style-group">
+                <summary>图表题注</summary>
+                <div class="form-row">
+                  <label class="field"><span>图题位置</span>
+                    <select name="captions.figure.position">
+                      <option value="below">图下</option>
+                      <option value="above">图上</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>题注字号</span><select name="captions.figure.size"><option value="22pt">二号 22pt</option>
+<option value="18pt">小二 18pt</option>
+<option value="16pt">三号 16pt</option>
+<option value="15pt">小三 15pt</option>
+<option value="14pt">四号 14pt</option>
+<option value="12pt">小四 12pt</option>
+<option value="10.5pt">五号 10.5pt</option>
+<option value="9pt">小五 9pt</option></select></label>
+                  <label class="field"><span>题注对齐</span>
+                    <select name="captions.figure.align">
+                      <option value="center">居中</option>
+                      <option value="left">左对齐</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+
+              <details class="style-group">
+                <summary>参考文献</summary>
+                <div class="form-row">
+                  <label class="field"><span>字体</span><select name="references.font_cn"><option value="SimSun">宋体</option>
+<option value="SimHei">黑体</option>
+<option value="KaiTi">楷体</option>
+<option value="FangSong">仿宋</option></select></label>
+                  <label class="field"><span>字号</span><select name="references.size"><option value="22pt">二号 22pt</option>
+<option value="18pt">小二 18pt</option>
+<option value="16pt">三号 16pt</option>
+<option value="15pt">小三 15pt</option>
+<option value="14pt">四号 14pt</option>
+<option value="12pt">小四 12pt</option>
+<option value="10.5pt">五号 10.5pt</option>
+<option value="9pt">小五 9pt</option></select></label>
+                  <label class="field"><span>悬挂缩进 (字符)</span><input type="number" name="references.hanging_indent" value="2" step="1" min="0" max="6"></label>
+                  <label class="field"><span>编号形式</span>
+                    <select name="references.numbering">
+                      <option value="bracket">[1]</option>
+                      <option value="plain">1.</option>
+                      <option value="author_year">作者-年份</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="field"><span>作者格式</span>
+                    <select name="author_format">
+                      <option value="surname_initial">姓+首字母</option>
+                      <option value="initial_surname">首字母+姓</option>
+                      <option value="surname_firstname">姓+名</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>et al 阈值</span><input type="number" name="max_authors_et_al" value="5" min="1" max="20"></label>
+                  <label class="field"><span>年份格式</span>
+                    <select name="year_format">
+                      <option value="no_parentheses">无括号</option>
+                      <option value="parentheses">括号包裹</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>标题大小写</span>
+                    <select name="title_case">
+                      <option value="sentence">句首大写</option>
+                      <option value="title">标题大写</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="field"><span>引用标注</span>
+                    <select name="citation_style">
+                      <option value="superscript">上标数字</option>
+                      <option value="bracket">括号数字 [1]</option>
+                      <option value="author_year">作者-年份</option>
+                    </select>
+                  </label>
+                  <label class="field"><span>排序</span>
+                    <select name="sort_order">
+                      <option value="citation_order">按引用顺序</option>
+                      <option value="alphabetical">按字母顺序</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+
+              <details class="style-group">
+                <summary>页眉页脚</summary>
+                <div class="form-row">
+                  <label class="field"><span>页眉内容</span><input type="text" name="header_footer.header_text" placeholder="可选，如论文标题"></label>
+                  <label class="field"><span>页码位置</span>
+                    <select name="header_footer.page_number.position">
+                      <option value="center">居中</option>
+                      <option value="right">右下</option>
+                      <option value="left">左下</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+            </div>
+
+            <aside class="style-preview">
+              <p class="meta-label">实时预览</p>
+              <div class="preview-page" id="style-preview-page">
+                <div class="preview-title">学位论文题目示例</div>
+                <div class="preview-h1">第一章 绪论</div>
+                <p class="preview-body">本文围绕示例主题展开，用于预览字体、字号、行距与首行缩进的实际效果。</p>
+                <div class="preview-h2">1.1 研究背景</div>
+                <p class="preview-body">预览会随左侧表单实时更新，导出时按同一份规则写入 Word。</p>
+                <div class="preview-caption">图 1-1 示例题注</div>
+                <div class="preview-ref">[1] 张三. 示例文献[J]. 软件学报, 2024.</div>
+              </div>
+            </aside>
           </div>
-          <p class="meta-label">正文排版</p>
-          <div class="form-row">
-            <label class="field"><span>行距</span>
-              <select name="line_spacing">
-                <option value="1.0">单倍</option>
-                <option value="1.5">1.5 倍</option>
-                <option value="2.0">双倍</option>
-              </select>
-            </label>
-            <label class="field"><span>正文字号</span>
-              <select name="font_size">
-                <option value="12pt">小四 (12pt)</option>
-                <option value="10.5pt">五号 (10.5pt)</option>
-                <option value="11pt">11pt</option>
-              </select>
-            </label>
-            <label class="field"><span>字体</span>
-              <select name="font_family">
-                <option value="SimSun">宋体</option>
-                <option value="Times New Roman">Times New Roman</option>
-                <option value="SimHei">黑体</option>
-              </select>
-            </label>
+
+          <div class="capability-note">
+            <strong>能力边界</strong>
+            <p><b>自动应用：</b>纸张与页边距、正文字体/字号/行距/首行缩进/对齐/段前后、一至三级标题的字体/字号/加粗/对齐/段前后、图表题注字号与对齐、参考文献字体/字号/悬挂缩进/编号形式。</p>
+            <p><b>需人工核对：</b>封面、目录、章节编号体系（第X章 / 1.1）、图表题注位置与编号、公式编号、页码起始与分节、脚注。</p>
           </div>
-          <div class="form-row">
-            <label class="field"><span>页边距-上 (cm)</span>
-              <input type="number" name="margin_top" value="2.54" step="0.1" min="0">
-            </label>
-            <label class="field"><span>页边距-下 (cm)</span>
-              <input type="number" name="margin_bottom" value="2.54" step="0.1" min="0">
-            </label>
-            <label class="field"><span>页边距-左 (cm)</span>
-              <input type="number" name="margin_left" value="3.18" step="0.1" min="0">
-            </label>
-            <label class="field"><span>页边距-右 (cm)</span>
-              <input type="number" name="margin_right" value="3.18" step="0.1" min="0">
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="field"><span>图表标题位置</span>
-              <select name="figure_caption">
-                <option value="below">图下表上</option>
-                <option value="above">图上表上</option>
-              </select>
-            </label>
-            <label class="field"><span>段落首行缩进</span>
-              <select name="first_line_indent">
-                <option value="2chars">缩进 2 字符</option>
-                <option value="none">不缩进</option>
-              </select>
-            </label>
-            <label class="field"><span>对齐方式</span>
-              <select name="body_alignment">
-                <option value="both">两端对齐</option>
-                <option value="left">左对齐</option>
-              </select>
-            </label>
-          </div>
-          <p class="meta-label">标题层级字体</p>
-          <div class="form-row">
-            <label class="field"><span>一级标题字体</span>
-              <select name="heading1_font">
-                <option value="SimHei">黑体</option>
-                <option value="SimSun">宋体</option>
-              </select>
-            </label>
-            <label class="field"><span>二级标题字体</span>
-              <select name="heading2_font">
-                <option value="SimHei">黑体</option>
-                <option value="SimSun">宋体</option>
-              </select>
-            </label>
-            <label class="field"><span>三级标题字体</span>
-              <select name="heading3_font">
-                <option value="SimHei">黑体</option>
-                <option value="SimSun">宋体</option>
-              </select>
-            </label>
-          </div>
-          <p class="meta-label">页眉页脚</p>
-          <div class="form-row">
-            <label class="field"><span>页眉内容</span>
-              <input type="text" name="page_header" placeholder="可选，如论文标题">
-            </label>
-            <label class="field"><span>页码位置</span>
-              <select name="page_number_pos">
-                <option value="center">居中</option>
-                <option value="right">右下</option>
-                <option value="left">左下</option>
-              </select>
-            </label>
-            <label class="field"><span>参考文献字体</span>
-              <select name="ref_font">
-                <option value="SimSun">宋体</option>
-                <option value="Times New Roman">Times New Roman</option>
-              </select>
-            </label>
-          </div>
+
           <button class="primary-button" type="submit">保存自定义格式 <span>→</span></button>
         </form>
       </div>

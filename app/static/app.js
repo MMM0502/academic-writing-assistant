@@ -600,9 +600,12 @@ function renderStructure(structure) {
 function renderFormat(data, target) {
   const warnings = (data.warnings || []).map((item) => `<div class="warning">${escapeHtml(item)}</div>`).join("");
   const structure = renderStructure(data.structure);
-  const schoolTemplate = data.school_template
-    ? `<div class="chips"><span class="chip chip-ok">已按 ${escapeHtml(data.school_template.school)} · ${escapeHtml(degreeNames[data.school_template.degree] || data.school_template.degree)} 模板排版</span><span class="chip">模板置信度 ${Math.round((data.school_template.confidence || 0) * 100)}%</span></div>`
+  const overridesChip = data.journal_base && data.journal_overrides
+    ? `<span class="chip">继承 ${escapeHtml(data.journal_base.school)} · 微调 ${countStyleLeaves(data.journal_overrides)} 项</span>`
     : "";
+  const schoolTemplate = data.school_template
+    ? `<div class="chips"><span class="chip chip-ok">已按 ${escapeHtml(data.school_template.school)} · ${escapeHtml(degreeNames[data.school_template.degree] || data.school_template.degree)} 模板排版</span><span class="chip">模板置信度 ${Math.round((data.school_template.confidence || 0) * 100)}%</span>${overridesChip}</div>`
+    : (overridesChip ? `<div class="chips">${overridesChip}</div>` : "");
   const preserveBtn = data.preserve_available
     ? `<a class="small-button" href="/api/download/${data.id}?format=docx&mode=preserve">保留原稿 Word</a>`
     : "";
@@ -919,55 +922,286 @@ async function deleteJournalStyle(id) {
   }
 }
 
+function setStylePath(tree, path, value) {
+  let node = tree;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const key = path[i];
+    if (!node[key] || typeof node[key] !== "object") node[key] = {};
+    node = node[key];
+  }
+  node[path[path.length - 1]] = value;
+}
+
+function buildStyleRules(form) {
+  const data = new FormData(form);
+  const rules = { schema_version: 2 };
+  for (const [key, value] of data.entries()) {
+    if (key === "name" || key === "publisher") continue;
+    if (value === "") continue;
+    setStylePath(rules, key.split("."), value);
+  }
+  ["1", "2", "3"].forEach((level) => {
+    const existing = (rules.headings && rules.headings[level]) || {};
+    existing.bold = data.has(`headings.${level}.bold`);
+    setStylePath(rules, ["headings", level], existing);
+  });
+  return rules;
+}
+
+const STYLE_BASE = { info: null, flat: null, rules: null };
+
+function setFormValue(form, name, value) {
+  const field = form.elements[name];
+  if (!field) return;
+  const text = String(value);
+  if (field.tagName === "SELECT") {
+    if (![...field.options].some((option) => option.value === text)) {
+      const option = document.createElement("option");
+      option.value = text;
+      option.textContent = text;
+      field.appendChild(option);
+    }
+    field.value = text;
+  } else if (field.type === "checkbox") {
+    field.checked = Boolean(value);
+  } else {
+    field.value = text;
+  }
+}
+
+function fillStyleFromFlat(form, flat) {
+  const direct = {
+    "page.margins.top": "margin_top",
+    "page.margins.bottom": "margin_bottom",
+    "page.margins.left": "margin_left",
+    "page.margins.right": "margin_right",
+    "body.font_cn": "font_family",
+    "body.size": "font_size",
+    "body.alignment": "body_alignment",
+    "references.font_cn": "ref_font",
+    "references.size": "ref_size",
+    "references.numbering": "ref_numbering",
+    "references.hanging_indent": "ref_hanging_chars",
+    "header_footer.header_text": "page_header",
+    "header_footer.page_number.position": "page_number_pos",
+    "captions.figure.position": "figure_caption",
+    "captions.figure.size": "caption_size",
+  };
+  for (const [field, key] of Object.entries(direct)) {
+    if (flat[key] !== undefined && flat[key] !== "") setFormValue(form, field, flat[key]);
+  }
+  if (flat.line_spacing_pt) {
+    setFormValue(form, "body.line_spacing.type", "exact");
+    setFormValue(form, "body.line_spacing.value", flat.line_spacing_pt);
+  } else if (flat.line_spacing) {
+    setFormValue(form, "body.line_spacing.type", "multiple");
+    setFormValue(form, "body.line_spacing.value", flat.line_spacing);
+  }
+  if (flat.first_line_indent) {
+    setFormValue(form, "body.first_line_indent.chars", flat.first_line_indent === "2chars" ? 2 : 0);
+  }
+  [1, 2, 3].forEach((level) => {
+    if (flat[`heading${level}_font`]) setFormValue(form, `headings.${level}.font_cn`, flat[`heading${level}_font`]);
+    if (flat[`heading${level}_size`]) setFormValue(form, `headings.${level}.size`, flat[`heading${level}_size`]);
+    if (flat[`heading${level}_align`]) setFormValue(form, `headings.${level}.align`, flat[`heading${level}_align`]);
+    if (flat[`heading${level}_bold`] !== undefined) setFormValue(form, `headings.${level}.bold`, flat[`heading${level}_bold`]);
+    if (flat[`heading${level}_before`]) setFormValue(form, `headings.${level}.before`, flat[`heading${level}_before`] / 20);
+    if (flat[`heading${level}_after`]) setFormValue(form, `headings.${level}.after`, flat[`heading${level}_after`] / 20);
+  });
+}
+
+function diffStyleRules(base, current) {
+  const output = {};
+  const baseNode = base || {};
+  for (const [key, value] of Object.entries(current || {})) {
+    if (key === "schema_version") continue;
+    const previous = baseNode[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const child = diffStyleRules(previous || {}, value);
+      if (Object.keys(child).length) output[key] = child;
+    } else if (value !== previous) {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+
+function countStyleLeaves(node) {
+  let total = 0;
+  const stack = [node || {}];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") stack.push(value);
+      else total += 1;
+    }
+  }
+  return total;
+}
+
+function updateBaseStatus() {
+  const status = $("#base-status");
+  const form = $("#journal-style-form");
+  if (!status || !form) return;
+  if (!STYLE_BASE.info || !STYLE_BASE.rules) {
+    status.textContent = "未继承学校模板：将作为独立格式保存。";
+    return;
+  }
+  const current = buildStyleRules(form);
+  const count = countStyleLeaves(diffStyleRules(STYLE_BASE.rules, current));
+  const degree = degreeNames[STYLE_BASE.info.degree] || STYLE_BASE.info.degree;
+  status.textContent = `基于 ${STYLE_BASE.info.school} · ${degree}，已改 ${count} 项`;
+}
+
+async function checkBackendCompat() {
+  try {
+    const response = await fetch("/api/settings/tavily");
+    if (response.status === 404) {
+      showOutdatedBackendBanner();
+    }
+  } catch (error) {
+    /* 服务不可达时由各功能自身报错 */
+  }
+}
+
+function showOutdatedBackendBanner() {
+  if (document.getElementById("backend-outdated")) return;
+  const bar = document.createElement("div");
+  bar.id = "backend-outdated";
+  bar.className = "backend-outdated";
+  bar.innerHTML = `当前页面连接的是 <b>旧版后端</b>：缺少学校模板、格式继承与搜索接口。<a class="backend-outdated-link" href="//${location.hostname}:8766/">点此打开新版（8766）</a>，或重启服务后刷新。`;
+  document.body.prepend(bar);
+}
+
+async function loadBaseTemplate() {
+  const degree = $("#base-degree").value;
+  const school = $("#base-school").value.trim();
+  const college = $("#base-college").value.trim();
+  if (!school) {
+    showToast("请填写要继承的学校");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/templates/rules?${new URLSearchParams({ degree, school, college })}`);
+    const payload = await response.json();
+    if (!response.ok) {
+      if (payload.error === "接口不存在") {
+        throw new Error("当前后端是旧版本：请改用新版端口或重启服务");
+      }
+      throw new Error(payload.error || "没有找到该校模板，请先到 01 学校格式推荐提取。");
+    }
+    const form = $("#journal-style-form");
+    fillStyleFromFlat(form, payload.rules || {});
+    STYLE_BASE.info = { degree, school, college };
+    STYLE_BASE.flat = payload.rules || {};
+    STYLE_BASE.rules = buildStyleRules(form);
+    $("#reset-base-template").hidden = false;
+    updateStylePreview();
+    updateBaseStatus();
+    showToast(`已载入 ${school} 的模板，可在其上微调`);
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function resetBaseTemplate() {
+  if (!STYLE_BASE.flat) return;
+  const form = $("#journal-style-form");
+  fillStyleFromFlat(form, STYLE_BASE.flat);
+  STYLE_BASE.rules = buildStyleRules(form);
+  updateStylePreview();
+  updateBaseStatus();
+}
+
+const FONT_CSS = {
+  SimSun: '"SimSun","宋体",serif',
+  SimHei: '"SimHei","黑体",sans-serif',
+  KaiTi: '"KaiTi","楷体",serif',
+  FangSong: '"FangSong","仿宋",serif',
+  "Times New Roman": '"Times New Roman",serif',
+  Calibri: "Calibri,sans-serif",
+  Arial: "Arial,sans-serif",
+};
+
+function updateStylePreview() {
+  const form = $("#journal-style-form");
+  const page = $("#style-preview-page");
+  if (!form || !page) return;
+  const value = (name, fallback) => (form.elements[name] && form.elements[name].value) || fallback;
+  const padding = (cm) => `${Math.max(4, Math.round(Number(cm || 2.54) * 9))}px`;
+  page.style.padding = `${padding(value("page.margins.top", 2.54))} ${padding(value("page.margins.right", 3.18))} ${padding(value("page.margins.bottom", 2.54))} ${padding(value("page.margins.left", 3.18))}`;
+
+  page.querySelectorAll(".preview-body").forEach((node) => {
+    node.style.fontFamily = FONT_CSS[value("body.font_cn", "SimSun")] || "serif";
+    node.style.fontSize = value("body.size", "12pt");
+    const type = value("body.line_spacing.type", "multiple");
+    const spacing = value("body.line_spacing.value", "1.5");
+    node.style.lineHeight = type === "exact" ? `${spacing}pt` : String(spacing);
+    node.style.textIndent = `${Number(value("body.first_line_indent.chars", 2)) || 0}em`;
+    node.style.textAlign = value("body.alignment", "both") === "both" ? "justify" : "left";
+    node.style.marginTop = `${Number(value("body.space_before", 0)) || 0}pt`;
+    node.style.marginBottom = `${Number(value("body.space_after", 0)) || 0}pt`;
+  });
+
+  const h1 = page.querySelector(".preview-h1");
+  if (h1) {
+    h1.style.fontFamily = FONT_CSS[value("headings.1.font_cn", "SimHei")] || "sans-serif";
+    h1.style.fontSize = value("headings.1.size", "22pt");
+    h1.style.textAlign = value("headings.1.align", "center");
+    h1.style.fontWeight = form.elements["headings.1.bold"] && form.elements["headings.1.bold"].checked ? "700" : "400";
+  }
+  const h2 = page.querySelector(".preview-h2");
+  if (h2) {
+    h2.style.fontFamily = FONT_CSS[value("headings.2.font_cn", "SimHei")] || "sans-serif";
+    h2.style.fontSize = value("headings.2.size", "16pt");
+    h2.style.textAlign = value("headings.2.align", "left");
+    h2.style.fontWeight = form.elements["headings.2.bold"] && form.elements["headings.2.bold"].checked ? "700" : "400";
+  }
+  const caption = page.querySelector(".preview-caption");
+  if (caption) {
+    caption.style.fontSize = value("captions.figure.size", "10.5pt");
+    caption.style.textAlign = value("captions.figure.align", "center");
+    caption.style.fontFamily = FONT_CSS[value("body.font_cn", "SimSun")] || "serif";
+  }
+  const ref = page.querySelector(".preview-ref");
+  if (ref) {
+    ref.style.fontSize = value("references.size", "10.5pt");
+    ref.style.fontFamily = FONT_CSS[value("references.font_cn", "SimSun")] || "serif";
+  }
+  updateBaseStatus();
+}
+
 $("#journal-style-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const rules = {
-    author_format: form.author_format.value,
-    author_separator: ", ",
-    max_authors_et_al: parseInt(form.max_authors_et_al.value, 10),
-    year_format: form.year_format.value,
-    title_case: form.title_case.value,
-    journal_italic: true,
-    volume_bold: false,
-    pages_prefix: "pp.",
-    number_prefix: "",
-    doi_prefix: "doi:",
-    citation_style: form.citation_style.value,
-    sort_order: form.sort_order.value,
-    line_spacing: form.line_spacing.value,
-    font_size: form.font_size.value,
-    font_family: form.font_family.value,
-    margin_top: form.margin_top.value,
-    margin_bottom: form.margin_bottom.value,
-    margin_left: form.margin_left.value,
-    margin_right: form.margin_right.value,
-    figure_caption: form.figure_caption.value,
-    first_line_indent: form.first_line_indent.value,
-    body_alignment: form.body_alignment.value,
-    heading1_font: form.heading1_font.value,
-    heading2_font: form.heading2_font.value,
-    heading3_font: form.heading3_font.value,
-    ref_font: form.ref_font.value,
-    page_header: form.page_header.value,
-    page_number_pos: form.page_number_pos.value,
-  };
+  const rules = buildStyleRules(form);
   try {
     const response = await fetch("/api/journal-styles", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-      body: JSON.stringify({ name: form.name.value, publisher: form.publisher.value, rules }),
+      body: JSON.stringify({
+        name: form.elements["name"].value,
+        publisher: form.elements["publisher"].value,
+        rules,
+        base: STYLE_BASE.info,
+        overrides: STYLE_BASE.info ? diffStyleRules(STYLE_BASE.rules, rules) : undefined,
+      }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "创建失败");
     showToast("自定义格式已保存");
-    form.reset();
     loadJournalStyles();
     loadFormatJournalStyles();
+    updateStylePreview();
   } catch (error) {
     showToast(error.message);
   }
 });
+
+$("#journal-style-form").addEventListener("input", updateStylePreview);
+$("#journal-style-form").addEventListener("change", updateStylePreview);
+$("#load-base-template").addEventListener("click", loadBaseTemplate);
+$("#reset-base-template").addEventListener("click", resetBaseTemplate);
 
 async function loadFormatJournalStyles() {
   const select = $("#format-journal-style");
@@ -1012,5 +1246,6 @@ async function loadStats() {
 }
 
 checkAuth();
+checkBackendCompat();
 loadFormatJournalStyles();
 renderFormatSchoolHint();

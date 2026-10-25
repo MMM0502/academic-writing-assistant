@@ -17,7 +17,7 @@ from .llm import get_status as get_llm_status, normalize_references
 from .parsers import extract_text, extract_structure
 from .review import build_item, generate_review, serialize_items
 from .storage import Store
-from . import auth, format_extract, journals, stats, template_search
+from . import auth, format_extract, format_schema, journals, stats, template_search
 
 
 ROOT = Path(__file__).resolve().parent
@@ -192,7 +192,12 @@ class Handler(BaseHTTPRequestHandler):
         output_format = query.get("format", ["md"])[0].lower()
         mode = query.get("mode", ["rebuild"])[0].lower()
         if output_format == "docx":
-            layout_rules = payload.get("school_rules") or payload.get("journal_rules")
+            school_rules = payload.get("school_rules")
+            journal_overrides = payload.get("journal_overrides")
+            if school_rules and journal_overrides:
+                layout_rules = format_schema.merge_rules(school_rules, journal_overrides)
+            else:
+                layout_rules = school_rules or payload.get("journal_rules")
             export_style = rules_to_export_style(layout_rules) if layout_rules else None
             if mode == "preserve" and payload.get("source_data"):
                 import base64
@@ -377,7 +382,21 @@ class Handler(BaseHTTPRequestHandler):
         rules = data.get("rules", {})
         if not isinstance(rules, dict):
             raise ValueError("格式规则必须是 JSON 对象。")
-        style_id = journals.create_custom_style(store, name, rules, publisher=publisher, created_by=created_by)
+        base = data.get("base") or {}
+        overrides = data.get("overrides")
+        if base and not base.get("school"):
+            base = {}
+        if overrides is not None and not isinstance(overrides, dict):
+            raise ValueError("差异内容必须是 JSON 对象。")
+        style_id = journals.create_custom_style(
+            store,
+            name,
+            rules,
+            publisher=publisher,
+            created_by=created_by,
+            base=base,
+            overrides=overrides,
+        )
         style = journals.get_style(store, style_id)
         self.send_payload(HTTPStatus.CREATED, style)
 
@@ -573,6 +592,8 @@ class Handler(BaseHTTPRequestHandler):
                 result["journal_style_name"] = js["name"]
                 result["journal_style_id"] = js["id"]
                 result["journal_rules"] = rules
+                result["journal_overrides"] = js.get("overrides")
+                result["journal_base"] = js.get("base")
         school_degree = fields.get("school_degree", "")
         school_name = fields.get("school_name", "")
         if school_degree and school_name:

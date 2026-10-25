@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from .format_schema import count_overrides, merge_rules
 from .storage import Store
 
 
@@ -216,13 +217,47 @@ def list_styles(store: Store) -> list[dict]:
 
 
 def get_style(store: Store, style_id: int) -> dict | None:
-    return store.get_journal_style(style_id)
+    style = store.get_journal_style(style_id)
+    if not style:
+        return None
+    base = style.get("base")
+    overrides = style.get("overrides")
+    style["overrides_count"] = count_overrides(overrides)
+    style["base_missing"] = False
+    if base and base.get("school") and overrides is not None:
+        saved = store.get_template_rules(base.get("degree", ""), base["school"], base.get("college", ""))
+        if saved:
+            style["rules"] = merge_rules(saved["rules"], overrides)
+        else:
+            style["base_missing"] = True
+    return style
 
 
-def create_custom_style(store: Store, name: str, rules: dict, publisher: str = "", created_by: int | None = None) -> int:
+def create_custom_style(
+    store: Store,
+    name: str,
+    rules: dict,
+    publisher: str = "",
+    created_by: int | None = None,
+    base: dict | None = None,
+    overrides: dict | None = None,
+) -> int:
     if not name:
         raise ValueError("格式名称不能为空。")
-    return store.add_journal_style(name=name, rules=rules, publisher=publisher, is_builtin=False, created_by=created_by)
+    base = base or {}
+    merged = rules
+    if base.get("school") and overrides is not None:
+        saved = store.get_template_rules(base.get("degree", ""), base["school"], base.get("college", ""))
+        merged = merge_rules(saved["rules"] if saved else {}, overrides)
+    return store.add_journal_style(
+        name=name,
+        rules=merged,
+        publisher=publisher,
+        is_builtin=False,
+        created_by=created_by,
+        base=base or None,
+        overrides=overrides,
+    )
 
 
 def delete_custom_style(store: Store, style_id: int) -> bool:

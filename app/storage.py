@@ -35,6 +35,12 @@ class Store:
             with connection:
                 connection.execute("ALTER TABLE jobs ADD COLUMN user_id INTEGER")
 
+        style_columns = {row[1] for row in connection.execute("PRAGMA table_info(journal_styles)").fetchall()}
+        for column in ("base_degree", "base_school", "base_college", "overrides"):
+            if column not in style_columns:
+                with connection:
+                    connection.execute(f"ALTER TABLE journal_styles ADD COLUMN {column} TEXT")
+
     @staticmethod
     def _schema() -> str:
         return """
@@ -81,7 +87,11 @@ class Store:
             rules TEXT NOT NULL,
             is_builtin INTEGER NOT NULL DEFAULT 0,
             created_by INTEGER,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            base_degree TEXT,
+            base_school TEXT,
+            base_college TEXT,
+            overrides TEXT
         );
         CREATE TABLE IF NOT EXISTS school_templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,13 +313,56 @@ class Store:
                 cursor = connection.execute("DELETE FROM shares WHERE id = ?", (share_id,))
                 return cursor.rowcount > 0
 
-    def add_journal_style(self, name: str, rules: dict, publisher: str = "", is_builtin: bool = False, created_by: int | None = None) -> int:
+    @staticmethod
+    def _row_to_journal_style(row) -> dict:
+        base = None
+        if row["base_school"]:
+            base = {
+                "degree": row["base_degree"] or "",
+                "school": row["base_school"],
+                "college": row["base_college"] or "",
+            }
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "publisher": row["publisher"],
+            "rules": json.loads(row["rules"]),
+            "is_builtin": bool(row["is_builtin"]),
+            "created_by": row["created_by"],
+            "created_at": row["created_at"],
+            "base": base,
+            "overrides": json.loads(row["overrides"]) if row["overrides"] else None,
+        }
+
+    def add_journal_style(
+        self,
+        name: str,
+        rules: dict,
+        publisher: str = "",
+        is_builtin: bool = False,
+        created_by: int | None = None,
+        base: dict | None = None,
+        overrides: dict | None = None,
+    ) -> int:
         created_at = datetime.now(timezone.utc).isoformat()
+        base = base or {}
         with closing(self.connect()) as connection:
             with connection:
                 cursor = connection.execute(
-                    "INSERT INTO journal_styles(name, publisher, rules, is_builtin, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (name, publisher, json.dumps(rules, ensure_ascii=False), 1 if is_builtin else 0, created_by, created_at),
+                    "INSERT INTO journal_styles(name, publisher, rules, is_builtin, created_by, created_at, "
+                    "base_degree, base_school, base_college, overrides) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        name,
+                        publisher,
+                        json.dumps(rules, ensure_ascii=False),
+                        1 if is_builtin else 0,
+                        created_by,
+                        created_at,
+                        base.get("degree") or None,
+                        base.get("school") or None,
+                        base.get("college") or None,
+                        json.dumps(overrides, ensure_ascii=False) if overrides is not None else None,
+                    ),
                 )
                 return int(cursor.lastrowid)
 
@@ -325,18 +378,20 @@ class Store:
     def list_journal_styles(self) -> list[dict]:
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                "SELECT id, name, publisher, rules, is_builtin, created_by, created_at FROM journal_styles ORDER BY is_builtin DESC, id"
+                "SELECT id, name, publisher, rules, is_builtin, created_by, created_at, "
+                "base_degree, base_school, base_college, overrides FROM journal_styles ORDER BY is_builtin DESC, id"
             ).fetchall()
-        return [{"id": r["id"], "name": r["name"], "publisher": r["publisher"], "rules": json.loads(r["rules"]), "is_builtin": bool(r["is_builtin"]), "created_by": r["created_by"], "created_at": r["created_at"]} for r in rows]
+        return [self._row_to_journal_style(r) for r in rows]
 
     def get_journal_style(self, style_id: int) -> dict | None:
         with closing(self.connect()) as connection:
             row = connection.execute(
-                "SELECT id, name, publisher, rules, is_builtin, created_by, created_at FROM journal_styles WHERE id = ?", (style_id,)
+                "SELECT id, name, publisher, rules, is_builtin, created_by, created_at, "
+                "base_degree, base_school, base_college, overrides FROM journal_styles WHERE id = ?", (style_id,)
             ).fetchone()
         if not row:
             return None
-        return {"id": row["id"], "name": row["name"], "publisher": row["publisher"], "rules": json.loads(row["rules"]), "is_builtin": bool(row["is_builtin"]), "created_by": row["created_by"], "created_at": row["created_at"]}
+        return self._row_to_journal_style(row)
 
     def list_school_templates(self, degree: str, school: str, college: str = "") -> list[dict]:
         with closing(self.connect()) as connection:

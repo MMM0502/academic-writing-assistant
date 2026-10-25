@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .format_schema import to_flat
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -65,6 +67,19 @@ class ExportStyle:
     heading1_alignment: str = "center"
     heading2_alignment: str = "left"
     heading3_alignment: str = "left"
+    heading1_before: int = 240
+    heading1_after: int = 120
+    heading2_before: int = 240
+    heading2_after: int = 120
+    heading3_before: int = 120
+    heading3_after: int = 120
+    body_space_before: int = 0
+    body_space_after: int = 0
+    first_line_chars: int = 2
+    caption_size: int = 21
+    caption_align: str = "center"
+    ref_numbering: str = "bracket"
+    ref_hanging_chars: int = 2
     abstract_max_chars: int = 300
 
 
@@ -74,9 +89,18 @@ DEFAULT_STYLE = ExportStyle()
 def rules_to_export_style(rules: dict) -> ExportStyle:
     if not rules:
         return DEFAULT_STYLE
+    rules = to_flat(rules)
     cm_to_twip = 567
     pt_to_half_pt = 2
-    font_map = {"SimSun": ("Calibri", "宋体"), "SimHei": ("Calibri", "黑体"), "Times New Roman": ("Times New Roman", "宋体")}
+    font_map = {
+        "SimSun": ("Calibri", "宋体"),
+        "SimHei": ("Calibri", "黑体"),
+        "KaiTi": ("Calibri", "楷体"),
+        "FangSong": ("Calibri", "仿宋"),
+        "Times New Roman": ("Times New Roman", "宋体"),
+        "Calibri": ("Calibri", "宋体"),
+        "Arial": ("Arial", "宋体"),
+    }
     def _fonts(key, default_east="宋体"):
         v = rules.get(key, "SimSun")
         return font_map.get(v, ("Calibri", v))
@@ -100,10 +124,20 @@ def rules_to_export_style(rules: dict) -> ExportStyle:
     def _indent(key):
         v = rules.get(key, "2chars")
         return 480 if v == "2chars" else 0
+    def _bool(value, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
     body_ascii, body_east = _fonts("font_family")
     body_size = _pt("font_size", 12)
     line_sp = _spacing("line_spacing", "1.5")
-    indent = _indent("first_line_indent")
+    try:
+        indent = int(rules.get("first_line_indent_twips", 480))
+    except (TypeError, ValueError):
+        indent = 480
     m_top = _cm("margin_top", 2.54)
     m_bottom = _cm("margin_bottom", 2.54)
     m_left = _cm("margin_left", 3.18)
@@ -130,6 +164,25 @@ def rules_to_export_style(rules: dict) -> ExportStyle:
         heading3_font_ascii=h3_ascii, heading3_font_east=h3_east,
         heading1_size=_pt("heading1_size", 16), heading2_size=_pt("heading2_size", 14),
         heading3_size=_pt("heading3_size", 12),
+        heading1_bold=_bool(rules.get("heading1_bold")),
+        heading2_bold=_bool(rules.get("heading2_bold")),
+        heading3_bold=_bool(rules.get("heading3_bold")),
+        heading1_alignment=rules.get("heading1_align", "center"),
+        heading2_alignment=rules.get("heading2_align", "left"),
+        heading3_alignment=rules.get("heading3_align", "left"),
+        heading1_before=int(rules.get("heading1_before", 240) or 240),
+        heading1_after=int(rules.get("heading1_after", 120) or 120),
+        heading2_before=int(rules.get("heading2_before", 240) or 240),
+        heading2_after=int(rules.get("heading2_after", 120) or 120),
+        heading3_before=int(rules.get("heading3_before", 120) or 120),
+        heading3_after=int(rules.get("heading3_after", 120) or 120),
+        body_space_before=int(rules.get("space_before", 0) or 0),
+        body_space_after=int(rules.get("space_after", 0) or 0),
+        first_line_chars=int(rules.get("first_line_chars", 2) or 0),
+        caption_size=_pt("caption_size", 10.5),
+        caption_align=rules.get("caption_align", "center"),
+        ref_numbering=rules.get("ref_numbering", "bracket"),
+        ref_hanging_chars=int(rules.get("ref_hanging_chars", 2) or 0),
         ref_font_ascii=ref_ascii, ref_font_east=ref_east, ref_size=_pt("ref_size", 10.5),
         page_header=rules.get("page_header", ""),
         page_number_pos=rules.get("page_number_pos", "center") or "center",
@@ -221,6 +274,7 @@ def markdown_to_docx(markdown: str, title: str = "", style_code: str = "", expor
 
 
 def format_result_to_docx(result: dict, export_style: ExportStyle = None) -> bytes:
+    export_style = export_style or DEFAULT_STYLE
     title = str(result.get("title") or "学术文稿")
     body_text = str(result.get("body_text") or "")
     if not body_text:
@@ -235,8 +289,13 @@ def format_result_to_docx(result: dict, export_style: ExportStyle = None) -> byt
         formatted_line = str(item.get("formatted") or "").strip()
         if not formatted_line:
             continue
-        formatted_line = re.sub(r"^\s*\[\d+\]\s*", f"[{new_index}] ", formatted_line)
-        formatted_line = re.sub(r"^\s*\d+[.)、]\s*", f"{new_index}. ", formatted_line)
+        stripped_line = re.sub(r"^\s*(\[\d+\]|\d+[.)、])\s*", "", formatted_line)
+        if export_style.ref_numbering == "plain":
+            formatted_line = f"{new_index}. {stripped_line}"
+        elif export_style.ref_numbering == "author_year":
+            formatted_line = stripped_line
+        else:
+            formatted_line = f"[{new_index}] {stripped_line}"
         reference_lines.append(formatted_line)
 
     parts = [_paragraph_xml(title, "title", export_style)]
@@ -416,6 +475,8 @@ def _role_fonts(role: str, style: ExportStyle) -> tuple[str, str, int, bool]:
         return style.heading3_font_ascii, style.heading3_font_east, style.heading3_size, style.heading3_bold
     if role == "reference":
         return style.ref_font_ascii, style.ref_font_east, style.ref_size, False
+    if role == "caption":
+        return style.body_font_ascii, style.body_font_east, style.caption_size, False
     return style.body_font_ascii, style.body_font_east, style.body_size, False
 
 
@@ -447,15 +508,14 @@ def _apply_paragraph_format(p, role: str, style: ExportStyle) -> None:
         ppr = ElementTree.Element(f"{_W}pPr")
         p.insert(0, ppr)
 
+    alignment = {
+        "heading1": style.heading1_alignment,
+        "heading2": style.heading2_alignment,
+        "heading3": style.heading3_alignment,
+        "caption": style.caption_align,
+    }.get(role, style.body_alignment)
     jc = _sub(ppr, f"{_W}jc")
-    if role == "heading1":
-        jc.set(f"{_W}val", "center")
-    elif role in ("heading2", "heading3"):
-        jc.set(f"{_W}val", "left")
-    elif role == "caption":
-        jc.set(f"{_W}val", "center")
-    else:
-        jc.set(f"{_W}val", style.body_alignment or "both")
+    jc.set(f"{_W}val", alignment or "both")
 
     spacing = _sub(ppr, f"{_W}spacing")
     if style.line_spacing_exact:
@@ -464,14 +524,25 @@ def _apply_paragraph_format(p, role: str, style: ExportStyle) -> None:
     else:
         spacing.set(f"{_W}line", str(style.line_spacing))
         spacing.set(f"{_W}lineRule", "auto")
-    if role in ("heading1", "heading2", "heading3"):
-        spacing.set(f"{_W}before", "240")
-        spacing.set(f"{_W}after", "120")
+
+    if role == "heading1":
+        spacing.set(f"{_W}before", str(style.heading1_before))
+        spacing.set(f"{_W}after", str(style.heading1_after))
+    elif role == "heading2":
+        spacing.set(f"{_W}before", str(style.heading2_before))
+        spacing.set(f"{_W}after", str(style.heading2_after))
+    elif role == "heading3":
+        spacing.set(f"{_W}before", str(style.heading3_before))
+        spacing.set(f"{_W}after", str(style.heading3_after))
+    elif role == "body":
+        spacing.set(f"{_W}before", str(style.body_space_before))
+        spacing.set(f"{_W}after", str(style.body_space_after))
 
     ind = _sub(ppr, f"{_W}ind")
     if role == "reference":
-        ind.set(f"{_W}left", str(style.reference_hanging_indent))
-        ind.set(f"{_W}hanging", str(style.reference_hanging_indent))
+        hanging = int(style.ref_hanging_chars * style.ref_size / 2 * 20) or style.reference_hanging_indent
+        ind.set(f"{_W}left", str(hanging))
+        ind.set(f"{_W}hanging", str(hanging))
         ind.attrib.pop(f"{_W}firstLine", None)
         ind.attrib.pop(f"{_W}firstLineChars", None)
     elif role.startswith("heading") or role == "caption":
@@ -479,7 +550,7 @@ def _apply_paragraph_format(p, role: str, style: ExportStyle) -> None:
         ind.set(f"{_W}firstLineChars", "0")
     else:
         ind.set(f"{_W}firstLine", str(style.first_line_indent))
-        ind.set(f"{_W}firstLineChars", "200" if style.first_line_indent else "0")
+        ind.set(f"{_W}firstLineChars", str(int(style.first_line_chars) * 100))
 
     # 标题层级用大纲级别，导航窗格和自动目录才能识别
     outline = ppr.find(f"{_W}outlineLvl")
@@ -564,8 +635,13 @@ def _replace_references_in_place(body, result: dict, style: ExportStyle) -> None
         formatted_line = str(item.get("formatted") or "").strip()
         if not formatted_line:
             continue
-        formatted_line = re.sub(r"^\s*\[\d+\]\s*", f"[{new_index}] ", formatted_line)
-        formatted_line = re.sub(r"^\s*\d+[.)、]\s*", f"{new_index}. ", formatted_line)
+        stripped_line = re.sub(r"^\s*(\[\d+\]|\d+[.)、])\s*", "", formatted_line)
+        if style.ref_numbering == "plain":
+            formatted_line = f"{new_index}. {stripped_line}"
+        elif style.ref_numbering == "author_year":
+            formatted_line = stripped_line
+        else:
+            formatted_line = f"[{new_index}] {stripped_line}"
         ref_lines.append(formatted_line)
 
     if not ref_lines:
@@ -592,9 +668,11 @@ def _replace_references_in_place(body, result: dict, style: ExportStyle) -> None
     for line in ref_lines:
         new_p = ElementTree.SubElement(body, f"{_W}p")
         pPr = ElementTree.SubElement(new_p, f"{_W}pPr")
+        per_char = int(style.ref_size / 2 * 20)
+        hanging = int(style.ref_hanging_chars) * per_char or style.reference_hanging_indent
         ind = ElementTree.SubElement(pPr, f"{_W}ind")
-        ind.set(f"{_W}left", str(style.reference_hanging_indent))
-        ind.set(f"{_W}hanging", str(style.reference_hanging_indent))
+        ind.set(f"{_W}left", str(hanging))
+        ind.set(f"{_W}hanging", str(hanging))
         spacing = ElementTree.SubElement(pPr, f"{_W}spacing")
         spacing.set(f"{_W}after", str(style.reference_spacing_after))
         spacing.set(f"{_W}line", str(style.reference_line_spacing))
