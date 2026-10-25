@@ -31,18 +31,18 @@ function updateFileLabel(input, label) {
   label.textContent = files.length ? files.map((file) => file.name).join("、") : "尚未选择文件";
 }
 
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((item) => item.classList.toggle("active", item.id === `panel-${name}`));
+  if (name === "format") loadFormatJournalStyles();
+  if (name === "history") loadHistory();
+  if (name === "journals") loadJournalStyles();
+  if (name === "stats") loadStats();
+}
+
 function activateTabs() {
   document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach((item) => item.classList.remove("active"));
-      tab.classList.add("active");
-      $(`#panel-${tab.dataset.tab}`).classList.add("active");
-      if (tab.dataset.tab === "format") loadFormatJournalStyles();
-      if (tab.dataset.tab === "history") loadHistory();
-      if (tab.dataset.tab === "journals") loadJournalStyles();
-      if (tab.dataset.tab === "stats") loadStats();
-    });
+    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
   });
 }
 
@@ -230,10 +230,138 @@ function renderSchoolRecommendation(result) {
   $("#apply-school-format").addEventListener("click", () => {
     const styleSelect = $('#format-form select[name="style"]');
     styleSelect.value = "gb7714";
-    document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === "format"));
-    document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === "panel-format"));
-    showToast("已将 GB/T 7714-2015 设为引用规范；请按学校官方模板核对正文排版要求");
+    applySchoolTemplate();
   });
+}
+
+const SCHOOL_SELECTION_KEY = "academic-assistant.school-selection";
+
+function getSchoolSelection() {
+  try {
+    return JSON.parse(localStorage.getItem(SCHOOL_SELECTION_KEY) || "null");
+  } catch (error) {
+    return null;
+  }
+}
+
+function setSchoolSelection(selection) {
+  if (selection) localStorage.setItem(SCHOOL_SELECTION_KEY, JSON.stringify(selection));
+  else localStorage.removeItem(SCHOOL_SELECTION_KEY);
+  renderFormatSchoolHint();
+}
+
+function renderFormatSchoolHint() {
+  const hint = $("#format-school-hint");
+  if (!hint) return;
+  const selection = getSchoolSelection();
+  if (selection) {
+    const college = selection.college ? ` · ${escapeHtml(selection.college)}` : "";
+    hint.innerHTML = `当前模板：<strong>${escapeHtml(selection.school)}</strong> · ${escapeHtml(degreeNames[selection.degree] || selection.degree)}${college} <button class="small-button" type="button" id="clear-school-template">清除</button>`;
+    const clear = $("#clear-school-template");
+    if (clear) {
+      clear.addEventListener("click", () => {
+        setSchoolSelection(null);
+        showToast("已清除学校模板，导出时按引用规范排版");
+      });
+    }
+  } else {
+    hint.textContent = "未选择学校模板：导出时只应用引用规范与期刊样式，不改变正文排版。";
+  }
+}
+
+async function applySchoolTemplate() {
+  const form = $("#school-form");
+  const selection = {
+    degree: form.degree.value,
+    school: form.school.value.trim(),
+    college: form.college.value.trim(),
+  };
+  if (!selection.school) {
+    form.school.focus();
+    showToast("请先输入学校名称");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/templates/rules?${new URLSearchParams(selection)}`);
+    if (response.ok) {
+      setSchoolSelection(selection);
+      switchTab("format");
+      showToast(`已启用 ${selection.school} 的格式模板，上传文稿即可按它排版`);
+      return;
+    }
+    renderExtractPanel(selection);
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function renderExtractPanel(selection) {
+  const target = $("#template-search-results");
+  target.innerHTML = `<article class="template-source key-setup">
+    <div><span class="history-type">还没有该校的格式规则</span>
+    <h3>上传一份 ${escapeHtml(selection.school)} · ${escapeHtml(degreeNames[selection.degree] || selection.degree)} 的 Word 模板</h3>
+    <p>系统会抽取字体、字号、行距、页边距和标题格式；确认后入库，之后同一学校即可直接复用。</p>
+    <div class="key-row"><input id="template-file" type="file" accept=".docx"><button class="primary-button" id="extract-template" type="button">提取格式</button></div>
+    <small>仅支持 .docx；.doc 请先在 Word 中另存为 .docx。</small></div>
+  </article><div id="extract-result"></div>`;
+  $("#extract-template").addEventListener("click", () => runExtract(selection));
+}
+
+async function runExtract(selection) {
+  const input = $("#template-file");
+  const out = $("#extract-result");
+  if (!input.files.length) {
+    showToast("请选择一个 .docx 模板文件");
+    return;
+  }
+  const body = new FormData();
+  body.append("files", input.files[0]);
+  out.innerHTML = '<div class="empty-state">正在抽取格式…</div>';
+  try {
+    const response = await fetch("/api/templates/extract", { method: "POST", body });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "抽取失败");
+    const rules = payload.rules || {};
+    const meta = payload.meta || {};
+    const spacing = rules.line_spacing_pt ? `${rules.line_spacing_pt} 磅` : `${rules.line_spacing || "-"} 倍`;
+    const warnings = (meta.warnings || []).length
+      ? `<small>提示：${escapeHtml((meta.warnings || []).join("；"))}</small>`
+      : "";
+    out.innerHTML = `<article class="template-source">
+      <div><span class="history-type">抽取结果 · 置信度 ${Math.round((meta.confidence || 0) * 100)}%</span>
+      <h3>${escapeHtml(selection.school)} 模板规则</h3>
+      <p>正文 ${escapeHtml(rules.font_family || "-")} ${escapeHtml(rules.font_size || "-")} · 行距 ${escapeHtml(spacing)} · 页边距 ${escapeHtml(rules.margin_top || "-")}/${escapeHtml(rules.margin_bottom || "-")}/${escapeHtml(rules.margin_left || "-")}/${escapeHtml(rules.margin_right || "-")} cm</p>
+      <small>标题字号 ${escapeHtml(rules.heading1_size || "-")} / ${escapeHtml(rules.heading2_size || "-")} / ${escapeHtml(rules.heading3_size || "-")} · 参考文献 ${escapeHtml(rules.ref_size || "-")}</small>
+      ${warnings}
+      <div class="actions"><button class="primary-button" id="save-template-rules" type="button">保存并启用</button></div></div>
+    </article>`;
+    $("#save-template-rules").addEventListener("click", () => saveTemplateRules(selection, rules, meta));
+  } catch (error) {
+    out.innerHTML = `<div class="warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function saveTemplateRules(selection, rules, meta) {
+  try {
+    const response = await fetch("/api/templates/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...selection,
+        rules,
+        confidence: meta.confidence || 0,
+        source: "docx",
+        verified: true,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "保存失败");
+    setSchoolSelection(selection);
+    switchTab("format");
+    showToast("模板已保存并启用");
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
 function updateSchoolPreview() {
@@ -331,7 +459,48 @@ $("#school-form").addEventListener("submit", (event) => {
   updateSchoolPreview();
 });
 
-$("#search-school-templates").addEventListener("click", async () => {
+const CONFIDENCE_LABELS = { high: "高相关", medium: "中等相关", low: "参考" };
+
+function renderCustomStyleShortcut(target) {
+  target.innerHTML += `<div class="actions"><button class="small-button" id="go-custom-style">用自定义格式继续（05 期刊格式）</button></div>`;
+  $("#go-custom-style").addEventListener("click", () => {
+    switchTab("journals");
+    showToast("在 05 期刊格式里创建或选择自定义格式");
+  });
+}
+
+function renderSearchUnavailable(target) {
+  target.innerHTML = `<div class="empty-state">检索服务未启用。<br>部署者需在启动前设置环境变量 <code>TAVILY_API_KEY</code>，重启后即可联网检索。<br>也可以先用 05 期刊格式里的自定义排版继续。</div>`;
+  renderCustomStyleShortcut(target);
+}
+
+function renderTemplateResults(data, target) {
+  if (!data.configured) {
+    renderSearchUnavailable(target);
+    return;
+  }
+  const results = data.results || [];
+  const notice = `<p class="template-search-notice">${escapeHtml(data.message || "")}${data.cached ? "（来自本地缓存）" : ""}</p>`;
+  if (!results.length) {
+    target.innerHTML = `${notice}<div class="empty-state">没有找到学校/学院的官方模板候选。<br>可以补充学院全称、换个说法重试，或直接用自定义格式。</div>`;
+    renderCustomStyleShortcut(target);
+    target.innerHTML += `<div class="actions"><button class="small-button" id="retry-template-search">重新检索</button></div>`;
+    $("#retry-template-search").addEventListener("click", () => runTemplateSearch(true));
+    return;
+  }
+  const cards = results.map((item) => `<article class="template-source">
+    <div><span class="history-type">${item.official_domain_hint ? "教育机构域名" : "网页候选"} · ${escapeHtml(item.domain)}</span>
+    <h3><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a></h3>
+    <p>${escapeHtml(item.snippet || "无摘要")}</p>
+    <small>${item.published_date ? `网页日期：${escapeHtml(item.published_date)} · ` : ""}${CONFIDENCE_LABELS[item.confidence] || "参考"} · ${escapeHtml(item.status || "待人工核验")}</small></div>
+  </article>`).join("");
+  target.innerHTML = notice + cards;
+  target.innerHTML += `<div class="actions"><button class="small-button" id="use-school-template">使用该学校模板排版</button></div>`;
+  $("#use-school-template").addEventListener("click", () => applySchoolTemplate());
+  renderCustomStyleShortcut(target);
+}
+
+async function runTemplateSearch(refresh = false) {
   const form = $("#school-form");
   const school = form.school.value.trim();
   const target = $("#template-search-results");
@@ -340,22 +509,20 @@ $("#search-school-templates").addEventListener("click", async () => {
     showToast("请先输入学校名称");
     return;
   }
-  target.innerHTML = '<div class="empty-state">正在查询模板缓存与网页来源...</div>';
+  target.innerHTML = '<div class="empty-state">正在检索模板来源…</div>';
   const params = new URLSearchParams({ degree: form.degree.value, school, college: form.college.value.trim() });
+  if (refresh) params.set("refresh", "1");
   try {
     const response = await fetch(`/api/templates/search?${params}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "模板搜索失败");
-    const results = data.results || [];
-    const cards = results.map((item) => `<article class="template-source">
-      <div><span class="history-type">${item.official_domain_hint ? "教育机构域名线索" : "网页候选"} · ${escapeHtml(item.domain)}</span><h3><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a></h3>
-      <p>${escapeHtml(item.snippet || "无摘要")}</p><small>${item.published_date ? `网页日期：${escapeHtml(item.published_date)} · ` : ""}状态：${escapeHtml(item.status || "待人工核验")}</small></div>
-    </article>`).join("");
-    target.innerHTML = `<p class="template-search-notice">${escapeHtml(data.message || "")}${data.cached ? "（来自已缓存候选）" : ""}</p>${cards || '<div class="empty-state">没有找到候选网页。可检查学校/学院名称，或稍后重试。</div>'}`;
+    renderTemplateResults(data, target);
   } catch (error) {
     target.innerHTML = `<div class="warning">${escapeHtml(error.message)}</div>`;
   }
-});
+}
+
+$("#search-school-templates").addEventListener("click", () => runTemplateSearch(false));
 
 async function submitForm(form, endpoint, resultSelector) {
   const files = form.querySelector('input[type="file"]').files;
@@ -363,9 +530,22 @@ async function submitForm(form, endpoint, resultSelector) {
     showToast("请先选择文件");
     return;
   }
+  const legacyDoc = [...files].find((file) => file.name.toLowerCase().endsWith(".doc"));
+  if (legacyDoc) {
+    showToast(`暂不支持 .doc（${legacyDoc.name}），请先在 Word 中另存为 .docx`);
+    return;
+  }
   const result = $(resultSelector);
   result.innerHTML = '<div class="empty-state">正在分析文稿，请稍候...</div>';
   const data = new FormData(form);
+  if (endpoint.includes("/api/format")) {
+    const selection = getSchoolSelection();
+    if (selection) {
+      data.append("school_degree", selection.degree);
+      data.append("school_name", selection.school);
+      data.append("school_college", selection.college || "");
+    }
+  }
   try {
     const response = await fetch(endpoint, { method: "POST", body: data });
     const payload = await response.json();
@@ -420,6 +600,9 @@ function renderStructure(structure) {
 function renderFormat(data, target) {
   const warnings = (data.warnings || []).map((item) => `<div class="warning">${escapeHtml(item)}</div>`).join("");
   const structure = renderStructure(data.structure);
+  const schoolTemplate = data.school_template
+    ? `<div class="chips"><span class="chip chip-ok">已按 ${escapeHtml(data.school_template.school)} · ${escapeHtml(degreeNames[data.school_template.degree] || data.school_template.degree)} 模板排版</span><span class="chip">模板置信度 ${Math.round((data.school_template.confidence || 0) * 100)}%</span></div>`
+    : "";
   const preserveBtn = data.preserve_available
     ? `<a class="small-button" href="/api/download/${data.id}?format=docx&mode=preserve">保留原稿 Word</a>`
     : "";
@@ -434,6 +617,7 @@ function renderFormat(data, target) {
         <div class="metric"><strong>${data.reference_count}</strong><span>条参考文献</span></div>
         <div class="metric"><strong>${data.character_count}</strong><span>字符</span></div>
       </div>
+      ${schoolTemplate}
       ${structure}
       ${warnings}
       <div class="result-text">${escapeHtml(data.formatted_text)}</div>
@@ -829,3 +1013,4 @@ async function loadStats() {
 
 checkAuth();
 loadFormatJournalStyles();
+renderFormatSchoolHint();

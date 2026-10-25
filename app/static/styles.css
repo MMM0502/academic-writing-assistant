@@ -192,3 +192,9 @@ select:focus, input[type=text]:focus { border-color: var(--teal); }
 
 .journal-builtin { margin-bottom: 16px; }
 .journal-custom .history-item { margin-bottom: 8px; }
+
+/* 学校模板检索：三态与 Key 配置 */
+.key-row { display: flex; gap: .5rem; margin: .75rem 0; flex-wrap: wrap; }
+.key-row input { flex: 1 1 260px; padding: .55rem .7rem; border: 1px solid #cfd8dc; border-radius: 6px; font: inherit; }
+.template-search-results .actions { display: flex; gap: .5rem; margin-top: .75rem; flex-wrap: wrap; }
+.template-source.key-setup { border-left: 3px solid #0f766e; }
