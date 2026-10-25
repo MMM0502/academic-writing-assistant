@@ -35,9 +35,8 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((item) => item.classList.toggle("active", item.id === `panel-${name}`));
   if (name === "format") loadFormatJournalStyles();
-  if (name === "history") loadHistory();
+  if (name === "history") { loadHistory(); loadStats(); }
   if (name === "journals") loadJournalStyles();
-  if (name === "stats") loadStats();
 }
 
 function activateTabs() {

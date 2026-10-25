@@ -67,7 +67,6 @@
       <button class="tab" data-tab="format"><span>03</span>文稿规整</button>
       <button class="tab" data-tab="review"><span>04</span>综述生成</button>
       <button class="tab" data-tab="history"><span>05</span>处理记录</button>
-      <button class="tab" data-tab="stats"><span>06</span>统计看板</button>
     </nav>
 
     <section class="workspace">
@@ -160,6 +159,16 @@
           <span class="pill">仅保存在本机</span>
         </div>
         <div id="history-list" class="history-list"><div class="empty-state">正在读取记录...</div></div>
+
+        <div class="panel-heading">
+          <div><p class="kicker">DASHBOARD</p><h2>统计看板</h2></div>
+          <span class="pill">处理量与质量指标</span>
+        </div>
+        <div class="panel-heading" style="margin-top:1rem;">
+          <div><p class="kicker">TREND</p><h2>近 14 天处理次数</h2></div>
+        </div>
+        <div id="stats-chart" class="stats-chart"><div class="empty-state">正在加载趋势...</div></div>
+        <div id="stats-content"><div class="empty-state">正在加载统计数据...</div></div>
       </div>
 
       <div class="panel tab-panel" id="panel-journals">
@@ -494,24 +503,8 @@
         </form>
       </div>
 
-      <div class="panel tab-panel" id="panel-stats">
-        <div class="panel-heading">
-          <div><p class="kicker">DASHBOARD</p><h2>统计看板</h2></div>
-          <span class="pill">处理量与质量指标</span>
-        </div>
-        <div class="panel-heading" style="margin-top:1rem;">
-          <div><p class="kicker">TREND</p><h2>近 14 天处理次数</h2></div>
-        </div>
-        <div id="stats-chart" class="stats-chart"><div class="empty-state">正在加载趋势...</div></div>
-        <div id="stats-content"><div class="empty-state">正在加载统计数据...</div></div>
-      </div>
     </section>
 
-    <section class="principles">
-      <div><span class="principle-number">A</span><strong>规则先行</strong><p>先用可解释的格式规则处理，结果每一步都能核对。</p></div>
-      <div><span class="principle-number">B</span><strong>大模型增强</strong><p>配置模型接口后，综述可进一步进行观点归纳与表达优化。</p></div>
-      <div><span class="principle-number">C</span><strong>作者确认</strong><p>系统提供写作辅助，不替代作者对事实、引用和结论的最终判断。</p></div>
-    </section>
   </main>
   <div class="toast" id="toast"></div>
   <script src="/static/app.js?v=20261011-history-format"></script>
