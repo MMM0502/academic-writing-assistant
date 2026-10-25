@@ -107,14 +107,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_payload(HTTPStatus.NOT_FOUND, {"error": "尚未保存该校的格式规则。"})
             else:
                 self.send_payload(HTTPStatus.OK, rules)
-        elif parsed.path == "/api/settings/llm":
-            key, url, model = llm._resolve()
-            self.send_payload(HTTPStatus.OK, {
-                "configured": bool(key and url),
-                "model": model,
-                "api_url": url,
-                "source": "env" if (key and llm.os.getenv("LLM_API_KEY", "").strip()) else ("settings" if llm._stored("llm_api_key") else "none"),
-            })
         elif parsed.path == "/api/settings/tavily":
             api_key, source = template_search.resolve_api_key(store)
             self.send_payload(HTTPStatus.OK, {"configured": bool(api_key), "source": source})
@@ -251,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
 
     JSON_POST_PATHS = {
         "/api/auth/register", "/api/auth/login", "/api/auth/logout",
-        "/api/journal-styles", "/api/comments", "/api/shares", "/api/templates/cache", "/api/settings/tavily", "/api/settings/llm", "/api/templates/rules",
+        "/api/journal-styles", "/api/comments", "/api/shares", "/api/templates/cache", "/api/settings/tavily", "/api/templates/rules",
     }
     MULTIPART_POST_PATHS = {
         "/api/format", "/api/review", "/api/check-citations", "/api/review/edit", "/api/templates/extract",
@@ -278,8 +270,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_payload(HTTPStatus.CREATED, template_search.cache_candidate(store, data))
                 elif parsed.path == "/api/settings/tavily":
                     self.handle_set_tavily_key(data)
-                elif parsed.path == "/api/settings/llm":
-                    self.handle_set_llm_config(data)
                 elif parsed.path == "/api/templates/rules":
                     self.handle_save_template_rules(data)
             except ValueError as exc:
@@ -339,22 +329,6 @@ class Handler(BaseHTTPRequestHandler):
             verified=bool(data.get("verified", True)),
         )
         self.send_payload(HTTPStatus.CREATED, saved)
-
-    def handle_set_llm_config(self, data: dict) -> None:
-        api_key = str(data.get("api_key", "")).strip()
-        api_url = str(data.get("api_url", "")).strip()
-        model = str(data.get("model", "")).strip() or "deepseek-flash"
-        if api_url and not api_url.startswith(("http://", "https://")):
-            raise ValueError("API 地址必须以 http:// 或 https:// 开头。")
-        store.set_setting("llm_api_key", api_key)
-        store.set_setting("llm_api_url", api_url)
-        store.set_setting("llm_model", model)
-        self.send_payload(HTTPStatus.OK, {
-            "configured": bool(api_key and api_url),
-            "model": model,
-            "api_url": api_url,
-            "source": "settings" if api_key else "none",
-        })
 
     def handle_set_tavily_key(self, data: dict) -> None:
         api_key = str(data.get("api_key", "")).strip()

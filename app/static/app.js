@@ -1255,51 +1255,6 @@ function renderStatsChart(points) {
   </svg>`;
 }
 
-async function loadLlmConfig() {
-  const status = $("#llm-config-status");
-  try {
-    const response = await fetch("/api/settings/llm");
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "读取失败");
-    if ($("#llm-api-url") && data.api_url) $("#llm-api-url").value = data.api_url;
-    if ($("#llm-model-name") && data.model) $("#llm-model-name").value = data.model;
-    if (status) {
-      status.textContent = data.configured
-        ? `已配置：${data.model}（来源：${data.source === "env" ? "环境变量" : "页面设置"}）`
-        : "未配置大模型：综述生成将使用本地规则引擎。";
-    }
-  } catch (error) {
-    if (status) status.textContent = error.message;
-  }
-}
-
-async function saveLlmConfig() {
-  const status = $("#llm-config-status");
-  const payload = {
-    api_key: $("#llm-api-key").value.trim(),
-    api_url: $("#llm-api-url").value.trim() || "https://api.deepseek.com/chat/completions",
-    model: $("#llm-model-name").value.trim() || "deepseek-flash",
-  };
-  if (!payload.api_key) {
-    showToast("请填写 API Key");
-    return;
-  }
-  try {
-    const response = await fetch("/api/settings/llm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-      body: JSON.stringify(payload),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "保存失败");
-    $("#llm-api-key").value = "";
-    showToast("大模型配置已保存，综述生成会立即使用");
-    loadLlmConfig();
-  } catch (error) {
-    showToast(error.message);
-  }
-}
-
 async function loadStats() {
   const target = $("#stats-content");
   try {
@@ -1332,7 +1287,5 @@ async function loadStats() {
 
 checkAuth();
 checkBackendCompat();
-loadLlmConfig();
-$("#save-llm-config").addEventListener("click", saveLlmConfig);
 loadFormatJournalStyles();
 renderFormatSchoolHint();
