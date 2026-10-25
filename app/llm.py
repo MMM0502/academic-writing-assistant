@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.request
@@ -8,16 +9,42 @@ import urllib.request
 from .config import settings
 
 
+_store = None
+
+
+def bind_store(store) -> None:
+    global _store
+    _store = store
+
+
+def _stored(name: str) -> str:
+    if _store is None:
+        return ""
+    try:
+        return (_store.get_setting(name) or "").strip()
+    except Exception:
+        return ""
+
+
+def _resolve() -> tuple:
+    key = os.getenv("LLM_API_KEY", "").strip() or _stored("llm_api_key") or settings.llm_api_key
+    url = os.getenv("LLM_API_URL", "").strip() or _stored("llm_api_url") or settings.llm_api_url
+    model = os.getenv("LLM_MODEL", "").strip() or _stored("llm_model") or settings.llm_model
+    return key, url, model
+
+
 def configured() -> bool:
-    return bool(settings.llm_api_key and settings.llm_api_url)
+    key, url, _model = _resolve()
+    return bool(key and url)
 
 
 def generate_review(prompt: str) -> dict | None:
     if not configured():
         return None
+    key, url, model = _resolve()
     start_time = time.time()
     payload = {
-        "model": settings.llm_model,
+        "model": model,
         "temperature": 0.2,
         "messages": [
             {
@@ -28,11 +55,11 @@ def generate_review(prompt: str) -> dict | None:
         ],
     }
     request = urllib.request.Request(
-        settings.llm_api_url,
+        url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.llm_api_key}",
+            "Authorization": f"Bearer {key}",
         },
         method="POST",
     )
@@ -42,7 +69,7 @@ def generate_review(prompt: str) -> dict | None:
         elapsed = time.time() - start_time
         return {
             "content": result["choices"][0]["message"]["content"].strip(),
-            "model": settings.llm_model,
+            "model": model,
             "elapsed_seconds": round(elapsed, 2),
             "status": "success",
             "error": None,
@@ -51,7 +78,7 @@ def generate_review(prompt: str) -> dict | None:
         elapsed = time.time() - start_time
         return {
             "content": None,
-            "model": settings.llm_model,
+            "model": model,
             "elapsed_seconds": round(elapsed, 2),
             "status": "failed",
             "error": str(exc),
@@ -72,6 +99,7 @@ def normalize_references(references: list[dict], style: str = "gb7714") -> dict 
     """
     if not configured() or not references:
         return None
+    key, url, model = _resolve()
     compact = []
     for ref in references:
         compact.append({
@@ -90,7 +118,7 @@ def normalize_references(references: list[dict], style: str = "gb7714") -> dict 
         + json.dumps(compact, ensure_ascii=False)
     )
     payload = {
-        "model": settings.llm_model,
+        "model": model,
         "temperature": 0,
         "messages": [
             {
@@ -101,11 +129,11 @@ def normalize_references(references: list[dict], style: str = "gb7714") -> dict 
         ],
     }
     request = urllib.request.Request(
-        settings.llm_api_url,
+        url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.llm_api_key}",
+            "Authorization": f"Bearer {key}",
         },
         method="POST",
     )
@@ -129,7 +157,7 @@ def normalize_references(references: list[dict], style: str = "gb7714") -> dict 
             cleaned.append(clean)
         return {
             "references": cleaned,
-            "model": settings.llm_model,
+            "model": model,
             "elapsed_seconds": round(time.time() - start_time, 2),
             "status": "success",
             "error": None,
@@ -137,7 +165,7 @@ def normalize_references(references: list[dict], style: str = "gb7714") -> dict 
     except Exception as exc:
         return {
             "references": [],
-            "model": settings.llm_model,
+            "model": model,
             "elapsed_seconds": round(time.time() - start_time, 2),
             "status": "failed",
             "error": str(exc),
@@ -145,9 +173,13 @@ def normalize_references(references: list[dict], style: str = "gb7714") -> dict 
 
 
 def get_status() -> dict:
+    key, url, model = _resolve()
+    is_ready = bool(key and url)
+    source = "env" if os.getenv("LLM_API_KEY", "").strip() else ("settings" if _stored("llm_api_key") else "none")
     return {
-        "configured": configured(),
-        "model": settings.llm_model if configured() else None,
-        "api_url": settings.llm_api_url if configured() else None,
-        "privacy_notice": "调用外部大模型时，文献内容将发送到外部服务，请注意数据合规。" if configured() else None,
+        "configured": is_ready,
+        "model": model if is_ready else None,
+        "api_url": url if is_ready else None,
+        "source": source,
+        "privacy_notice": "调用外部大模型时，文献内容会发送到外部服务，请注意数据合规。" if is_ready else None,
     }

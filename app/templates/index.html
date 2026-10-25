@@ -137,6 +137,16 @@
           <div><p class="kicker">LITERATURE SYNTHESIS</p><h2>批量生成综述</h2></div>
           <span class="pill">结构化研究脉络</span>
         </div>
+        <div class="llm-config">
+          <p class="meta-label">大模型（可选）：用于综述生成与文献字段修复</p>
+          <div class="form-row">
+            <label class="field"><span>API 地址</span><input type="text" id="llm-api-url" placeholder="https://api.deepseek.com/chat/completions"></label>
+            <label class="field"><span>模型</span><input type="text" id="llm-model-name" placeholder="deepseek-flash"></label>
+            <label class="field"><span>API Key</span><input type="password" id="llm-api-key" placeholder="sk-..."></label>
+            <button class="small-button" id="save-llm-config" type="button">保存</button>
+          </div>
+          <p class="meta-label" id="llm-config-status"></p>
+        </div>
         <form id="review-form">
           <label class="field topic-field"><span>研究主题 <small>可选，帮助组织综述标题</small></span>
             <input type="text" name="topic" placeholder="例如：大模型在软件工程中的应用">
