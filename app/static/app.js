@@ -487,15 +487,17 @@ function renderTemplateResults(data, target) {
     $("#retry-template-search").addEventListener("click", () => runTemplateSearch(true));
     return;
   }
-  const cards = results.map((item) => `<article class="template-source">
+  const cards = results.map((item) => {
+    const snippet = item.snippet || "";
+    const brief = snippet.length > 100 ? snippet.slice(0, 100).trimEnd() + "…" : snippet;
+    return `<article class="template-source">
     <div><span class="history-type">${item.official_domain_hint ? "教育机构域名" : "网页候选"} · ${escapeHtml(item.domain)}</span>
     <h3><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a></h3>
-    <p>${escapeHtml(item.snippet || "无摘要")}</p>
+    <p>${escapeHtml(brief || "无摘要")}</p>
     <small>${item.published_date ? `网页日期：${escapeHtml(item.published_date)} · ` : ""}${CONFIDENCE_LABELS[item.confidence] || "参考"} · ${escapeHtml(item.status || "待人工核验")}</small></div>
-  </article>`).join("");
+  </article>`;
+  }).join("");
   target.innerHTML = notice + cards;
-  target.innerHTML += `<div class="actions"><button class="small-button" id="use-school-template">使用该学校模板排版</button></div>`;
-  $("#use-school-template").addEventListener("click", () => applySchoolTemplate());
   renderCustomStyleShortcut(target);
 }
 
@@ -521,7 +523,7 @@ async function runTemplateSearch(refresh = false) {
   }
 }
 
-$("#search-school-templates").addEventListener("click", () => runTemplateSearch(false));
+$("#search-school-templates").addEventListener("click", () => runTemplateSearch(true));
 
 async function submitForm(form, endpoint, resultSelector) {
   const files = form.querySelector('input[type="file"]').files;

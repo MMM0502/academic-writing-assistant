@@ -57,7 +57,7 @@ def _tavily_search(api_key: str, school: str, college: str, degree_label: str) -
         "api_key": api_key,
         "query": query,
         "search_depth": "advanced",
-        "max_results": 10,
+        "max_results": 20,
         "include_answer": False,
         "include_raw_content": False,
     }).encode("utf-8")
@@ -126,10 +126,6 @@ def _rank(candidates: list[dict]) -> list[dict]:
             continue
         seen.add(domain)
         picked.append(item)
-    # 已经有官方域名结果时，非教育机构域名只作兜底，不再混排
-    official = [item for item in picked if item.get("official_domain_hint")]
-    if official:
-        return official
     return picked
 
 
@@ -228,7 +224,7 @@ def search_templates(store: Store, degree: str, school: str, college: str = "", 
         "negative": not ranked,
         "results": ranked,
         "message": (
-            "已按官方域名与标题相关度排序，结果缓存 30 天；使用前请核对发布部门、适用学院和版本。"
+            "使用前请核对发布部门、适用学院和版本。"
             if ranked
             else "没有检索到候选来源。可以补充学院名称重试，或直接用自定义格式。"
         ),
